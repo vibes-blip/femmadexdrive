@@ -1,0 +1,9 @@
+{
+  "name":"FemmaDexDrive — Goods Delivery & Dispatch",
+  "short_name":"FemmaDexDrive",
+  "start_url":"/",
+  "display":"standalone",
+  "background_color":"#09090b",
+  "theme_color":"#10b981",
+  "description":"Fast goods pickup and doorstep delivery in Lagos with FemmaDexDrive riders."
+}
