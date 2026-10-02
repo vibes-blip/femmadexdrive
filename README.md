@@ -89,7 +89,7 @@ See `SECURITY.md`. The application uses server-side secrets, Supabase RLS, priva
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `005_paystack_idempotency.sql` in order.
+2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `006_chat_rooms_call_logs.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
 3. Create/confirm your Auth settings.
 4. Create your first admin account through Supabase Auth.
 5. Run `backend/supabase/ADMIN_SETUP.sql` to promote the intended operations account, or promote its verified profile by UUID:
@@ -99,6 +99,10 @@ See `SECURITY.md`. The application uses server-side secrets, Supabase RLS, priva
 Do not put the admin password in source code.
 
 The migration creates a private `rider-documents` storage bucket.
+
+### Existing test accounts
+
+Create and confirm each customer, rider, and admin account in Supabase Authentication first. Then run `backend/supabase/TEST_ACCOUNTS_SETUP.sql` to safely sync `profiles.role` by Auth email. It is safe to rerun, does not create users or change passwords, and does not depend on hard-coded UUIDs. It creates a missing rider profile as pending; approve the rider before dispatch testing. Login reads `profiles.role` after password verification and routes to the matching dashboard.
 
 ## Environment files and Netlify variables
 
