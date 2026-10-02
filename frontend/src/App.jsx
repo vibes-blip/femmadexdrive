@@ -5,7 +5,7 @@ import {ArrowRight,Bike,Box,Check,CheckCircle2,Clock3,LocateFixed,LogIn,LogOut,M
 const url=import.meta.env.VITE_SUPABASE_URL, key=import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase=url&&key?createClient(url,key):null;
 const API_BASE=(import.meta.env.VITE_API_BASE_URL||"https://femmadexdrive.onrender.com/api").replace(/\/+$/,"");
-const ADMIN_HOST=import.meta.env.VITE_ADMIN_HOST||"admin.femmadexdrive.netlify.app";
+const ADMIN_HOST=import.meta.env.VITE_ADMIN_HOST||"femmadexdive.netlify.app";
 
 const api=(path,body={},token)=>fetch(`${API_BASE}/${path}`,{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify(body)}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Request failed");return d});
 const money=n=>`₦${Number(n||0).toLocaleString()}`;
