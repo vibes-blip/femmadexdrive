@@ -1,0 +1,17 @@
+{
+  "name": "femmadexdrive-backend",
+  "private": true,
+  "version": "2.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/server": "^1.9.0",
+    "@supabase/supabase-js": "2.47.10",
+    "livekit-server-sdk": "^2.19.1"
+  }
+}
