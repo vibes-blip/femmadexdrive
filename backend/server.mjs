@@ -15,8 +15,10 @@ const routes = new Map([
   ["notify", { method: "POST", load: () => import("./netlify/functions/notify.mjs") }],
   ["public-track", { method: "POST", load: () => import("./netlify/functions/public-track.mjs") }],
   ["reverse-geocode", { method: "GET", load: () => import("./netlify/functions/reverse-geocode.mjs") }],
+  ["address-search", { method: "GET", load: () => import("./netlify/functions/address-search.mjs") }],
   ["paystack-callback", { method: "GET", load: () => import("./netlify/functions/paystack-callback.mjs") }],
   ["paystack-webhook", { method: "POST", load: () => import("./netlify/functions/paystack-webhook.mjs") }],
+  ["livekit-call", { method: "POST", load: () => import("./netlify/functions/livekit-call.mjs") }],
 ]);
 
 function corsHeaders(origin) {

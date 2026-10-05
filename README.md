@@ -13,10 +13,10 @@ This is the upgraded version of the supplied FemmaDexDrive project. It is split 
 
 - Signup/login through Supabase Auth.
 - Server-side road-distance calculation.
-- Weight + package size + dimensions.
+- Weight entry for large and very large parcels, plus package dimensions.
 - Motorcycle/car/van/lorry recommendation.
 - Server-side pricing so the browser cannot change the price calculation.
-- Admin price-review stage before payment.
+- Recipient name/address capture and admin-adjustable final price before payment.
 - Real Paystack checkout redirect.
 - Payment is only considered paid after Paystack verification/webhook.
 - Permanent tracking number.
@@ -31,7 +31,8 @@ This is the upgraded version of the supplied FemmaDexDrive project. It is split 
 - Pending-review state and admin approval.
 - Online/offline presence and compatible paid delivery requests.
 - Atomic delivery acceptance and status changes.
-- Rider sees package/vehicle/distance information, not the customer's delivery charge.
+- Rider sees recipient details and the admin-approved delivery price.
+- Riders can accept or decline jobs; decisions are recorded in Supabase and declined jobs are hidden from that rider.
 - Delivery stages: accepted → picked up → on the way → at destination → delivered.
 
 ### Admin
@@ -39,7 +40,7 @@ This is the upgraded version of the supplied FemmaDexDrive project. It is split 
 - Admin/supervisor role controlled in Supabase.
 - Production admin host restriction using `VITE_ADMIN_HOST`.
 - Delivery activity feed, full delivery details, price adjustment and payment status.
-- Rider application approval and availability.
+- Rider application approval, approval email, and availability.
 - Realtime order updates.
 
 ### Email
@@ -64,7 +65,7 @@ Paystack's webhook endpoint must be publicly reachable. Configure the Paystack w
 
 The redirect URL is:
 
-`https://femmadexdive.netlify.app/payment-result` (the Render callback redirects here after verification)
+`https://femmadexdrive.netlify.app/payment-result` (the Render callback redirects here after verification)
 
 The webhook verifies `x-paystack-signature` with HMAC SHA-512 before changing an order to paid.
 
@@ -74,7 +75,7 @@ Set:
 
 `ORS_API_KEY=...`
 
-The backend geocodes the two addresses and sends their coordinates to OpenRouteService driving directions. It stores the resulting road distance and estimated driving time.
+The backend geocodes the two addresses and sends their coordinates to OpenRouteService driving directions. It stores the resulting Precise Distance & ETA and estimated driving time.
 
 Do not replace this with a browser-provided distance. The backend recalculates it.
 
@@ -89,7 +90,7 @@ See `SECURITY.md`. The application uses server-side secrets, Supabase RLS, priva
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `006_chat_rooms_call_logs.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
+2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `008_delivery_recipient_price_and_responses.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
 3. Create/confirm your Auth settings.
 4. Create your first admin account through Supabase Auth.
 5. Run `backend/supabase/ADMIN_SETUP.sql` to promote the intended operations account, or promote its verified profile by UUID:
@@ -143,7 +144,7 @@ Default pricing values are environment variables so you can change the business 
 
 The initial engine uses:
 
-`base vehicle fee + road distance × vehicle km rate`
+`base vehicle fee + Precise Distance & ETA × vehicle km rate`
 
 and a simple heavy-weight surcharge.
 
@@ -155,13 +156,15 @@ The root `netlify.toml` builds and serves the frontend only. The API runs separa
 
 ### Netlify frontend
 
-Use `femmadexdive.netlify.app`. Set base directory `frontend`, build command `npm install --no-audit --no-fund && npm run build`, and publish directory `dist`. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_BASE_URL=https://femmadexdrive.onrender.com/api`, and `VITE_ADMIN_HOST=femmadexdive.netlify.app` in Netlify's build environment.
+Use `femmadexdrive.netlify.app`. Set base directory `frontend`, build command `npm install --no-audit --no-fund && npm run build`, and publish directory `dist`. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_BASE_URL=https://femmadexdrive.onrender.com/api`, and `VITE_ADMIN_HOST=femmadexdrive.netlify.app` in Netlify's build environment.
 
 ### Render API
 
-Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render. Set `APP_ORIGIN=https://femmadexdive.netlify.app` and `PAYSTACK_CALLBACK_URL=https://femmadexdrive.onrender.com/api/paystack-callback`. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–005 before enabling production traffic.
+Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render. Set `APP_ORIGIN=https://femmadexdrive.netlify.app` and `PAYSTACK_CALLBACK_URL=https://femmadexdrive.onrender.com/api/paystack-callback`. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–008 before enabling production traffic.
 
 The API exposes `/health` and endpoints under `/api/`. Automatic delivery completion runs at startup and once per minute in the Render process. Locally, run `npm run dev` from `frontend/` and `npm start` from `backend/`; frontend-only browser variables belong in `frontend/.env`, while server-only variables belong in `backend/.env`.
+
+For voice calls, set `LIVEKIT_URL=wss://femmadexdrive-8px9a45n.livekit.cloud`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in Render only. The authenticated API checks delivery participation and issues short-lived, microphone-only room tokens. Never put the API secret in a `VITE_*` variable or source control. Browsers must grant microphone access.
 
 Netlify production builds do not read local `.env` files. Configure browser variables in Netlify and server variables in Render, then redeploy both services. Never place Supabase server secrets or Paystack keys in `VITE_*` variables.
 
@@ -179,11 +182,11 @@ The required environment variables must be configured before real Supabase/Payst
 
 ## Customer and rider test accounts
 
-Accounts are real Supabase Auth users; this project does not contain test-account shortcuts or fixed credentials. Create or register a customer through the customer signup screen. Register a rider through the rider signup screen; the database trigger creates a pending rider application. Email confirmation must be completed if enabled in Supabase Auth. A rider must then be approved by operations before the rider portal can accept jobs. Use a new, unique password of at least eight characters for new accounts. Do not put test passwords in source code or environment files.
+Accounts are real Supabase Auth users. Create/confirm the customer, rider, and permanent admin accounts in Supabase Auth, then run `backend/supabase/TEST_ACCOUNTS_SETUP.sql` to sync `profiles.role` by email. It never creates Auth accounts or changes passwords. Login routes each account by its database role. The SQL explicitly auto-approves and sets online only the named test rider so it can accept test deliveries; remove that test-only update before using the setup script for live rider onboarding. Other new riders remain pending until approved. Set/change passwords in Supabase Auth only, never in SQL or source.
 
 ## Important production checks before accepting real customers
 
-The Render API process runs automatic completion every minute using migration 002. Confirm the scheduler logs after deployment.
+The Render API process runs automatic completion every minute using migration 002. Confirm the scheduler logs after deployment. Migration 007 stores the selected pickup/dropoff coordinates and adds them to the rider's available-deliveries feed; apply it before deploying the coordinate-dependent order API.
 
 - Verify your Paystack business account and live credentials.
 - Configure and test the Paystack webhook.
@@ -205,7 +208,7 @@ The local `frontend/.env` and `backend/.env` contain sensitive configuration and
 
 ## Delivery charge model
 
-The browser never sets the final charge. The backend geocodes both addresses, calculates road distance and driving duration through the routing provider, selects a vehicle from package weight/size rules, and calculates the system estimate. The order begins in `price_review`; only an admin/supervisor can release it to `awaiting_payment` by setting the final price. Paystack checkout can only be initialized for an `awaiting_payment` order.
+The browser never sets the final charge. The backend geocodes both addresses, calculates Precise Distance & ETA and driving duration through the routing provider, selects a vehicle from package weight/size rules, and calculates the system estimate. The order begins in `price_review`; only an admin/supervisor can release it to `awaiting_payment` by setting the final price. Paystack checkout can only be initialized for an `awaiting_payment` order.
 
 ## Customer ↔ rider chat
 

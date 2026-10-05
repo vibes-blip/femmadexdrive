@@ -1,8 +1,16 @@
+import {reverseGeocode} from "./_geocoding.mjs";
+
+const headers={"Content-Type":"application/json","Access-Control-Allow-Origin":process.env.APP_ORIGIN||"*","Access-Control-Allow-Methods":"GET, OPTIONS","Access-Control-Allow-Headers":"Content-Type, Authorization"};
+const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers});
 export default async req=>{
- if(req.method==="OPTIONS")return new Response("",{status:204});
+ if(req.method==="OPTIONS")return new Response("",{status:204,headers});
  const u=new URL(req.url),lat=Number(u.searchParams.get("lat")),lng=Number(u.searchParams.get("lng"));
- if(!Number.isFinite(lat)||!Number.isFinite(lng))return new Response(JSON.stringify({error:"Invalid coordinates"}),{status:400,headers:{"Content-Type":"application/json"}});
- const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,{headers:{"User-Agent":"FemmaDexDrive/2.0 contact:femmadexmanagement@gmail.com"}});
- if(!r.ok)return new Response(JSON.stringify({error:"Reverse geocoding failed"}),{status:502,headers:{"Content-Type":"application/json"}});
- const d=await r.json();return new Response(JSON.stringify({address:d.display_name||`${lat}, ${lng}`}),{headers:{"Content-Type":"application/json"}});
+ if(!Number.isFinite(lat)||lat < -90||lat>90||!Number.isFinite(lng)||lng < -180||lng>180)return reply({error:"Invalid coordinates"},400);
+ try{
+  return reply(await reverseGeocode(lat,lng));
+ }catch(error){
+  const status=error.message.startsWith("No readable")?404:error.message.startsWith("A valid")?400:502;
+  if(status===502)console.error("Reverse address lookup failed",error);
+  return reply({error:error.message},status);
+ }
 };

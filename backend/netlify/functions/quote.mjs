@@ -1,5 +1,32 @@
 import {json,body,err} from "./_lib.mjs";
-const geocode=async address=>{const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(address)}`,{headers:{"User-Agent":"FemmaDexDrive/2.0 contact:femmadexmanagement@gmail.com"}});if(!r.ok)throw new Error("Address search failed");const d=await r.json();if(!d[0])throw new Error(`Could not locate "${address}". Add street, area and city.`);return{lat:Number(d[0].lat),lng:Number(d[0].lon),label:d[0].display_name}};
+import {reverseGeocode} from "./_geocoding.mjs";
+
 const vehicle=(w,size,volume)=>{if(w>250||size==="very_large"||volume>1000000)return"lorry";if(w>50||size==="large"||volume>250000)return"van";if(w>12||size==="medium"||volume>60000)return"car";return"motorcycle"};
 const prices={motorcycle:[Number(process.env.PRICE_BASE_MOTORCYCLE||1000),Number(process.env.PRICE_PER_KM_MOTORCYCLE||180)],car:[Number(process.env.PRICE_BASE_CAR||1800),Number(process.env.PRICE_PER_KM_CAR||250)],van:[Number(process.env.PRICE_BASE_VAN||3000),Number(process.env.PRICE_PER_KM_VAN||350)],lorry:[Number(process.env.PRICE_BASE_LORRY||6000),Number(process.env.PRICE_PER_KM_LORRY||500)]};
-export default async req=>{if(req.method==="OPTIONS")return new Response("",{status:204});try{const b=await body(req);if(!b.pickupAddress||!b.dropoffAddress)throw new Error("Pickup and destination are required");const [a,c]=await Promise.all([geocode(b.pickupAddress),geocode(b.dropoffAddress)]);if(!process.env.ORS_API_KEY)throw new Error("ORS_API_KEY is not configured yet.");const rr=await fetch("https://api.openrouteservice.org/v2/directions/driving-car",{method:"POST",headers:{"Authorization":process.env.ORS_API_KEY,"Content-Type":"application/json"},body:JSON.stringify({coordinates:[[a.lng,a.lat],[c.lng,c.lat]],instructions:false})});if(!rr.ok)throw new Error("Road routing service could not calculate this route.");const route=await rr.json();const summary=route.routes?.[0]?.summary;if(!summary)throw new Error("No drivable route was found.");const distanceKm=Number((summary.distance/1000).toFixed(1));const durationMinutes=Math.max(1,Math.round(summary.duration/60));const volume=(Number(b.lengthCm)||0)*(Number(b.widthCm)||0)*(Number(b.heightCm)||0);const vehicleType=vehicle(Number(b.weightKg)||0,b.size,volume);const [base,perKm]=prices[vehicleType];let price=Math.ceil((base+distanceKm*perKm)/100)*100;const weight=Number(b.weightKg)||0;if(weight>100)price+=Math.ceil((weight-100)*10/100)*100;return json({pickup:a,dropoff:c,distanceKm,durationMinutes,vehicleType,price,currency:"NGN"});}catch(e){return err(e)}};
+
+export default async req=>{
+ if(req.method==="OPTIONS")return new Response("",{status:204});
+ try{
+  const b=await body(req);
+  if(!b.pickupCoordinates||!b.dropoffCoordinates)throw new Error("Select both pickup and destination locations from the address results or map.");
+  const [pickup,dropoff]=await Promise.all([
+   reverseGeocode(Number(b.pickupCoordinates.lat),Number(b.pickupCoordinates.lng)),
+   reverseGeocode(Number(b.dropoffCoordinates.lat),Number(b.dropoffCoordinates.lng))
+  ]);
+  if(!process.env.ORS_API_KEY)throw new Error("ORS_API_KEY is not configured yet.");
+  const routeResponse=await fetch("https://api.openrouteservice.org/v2/directions/driving-car",{
+   method:"POST",
+   headers:{"Authorization":process.env.ORS_API_KEY,"Content-Type":"application/json"},
+   body:JSON.stringify({coordinates:[[pickup.lng,pickup.lat],[dropoff.lng,dropoff.lat]],instructions:false})
+  });
+  if(!routeResponse.ok)throw new Error("Road routing service could not calculate this route.");
+  const route=await routeResponse.json(),summary=route.routes?.[0]?.summary;
+  if(!summary)throw new Error("No drivable route was found.");
+  const distanceKm=Number((summary.distance/1000).toFixed(1)),durationMinutes=Math.max(1,Math.round(summary.duration/60));
+  const volume=(Number(b.lengthCm)||0)*(Number(b.widthCm)||0)*(Number(b.heightCm)||0),weight=Number(b.weightKg)||0;
+  const vehicleType=vehicle(weight,b.size,volume),[base,perKm]=prices[vehicleType];
+  let price=Math.ceil((base+distanceKm*perKm)/100)*100;
+  if(weight>100)price+=Math.ceil((weight-100)*10/100)*100;
+  return json({pickup,dropoff,distanceKm,durationMinutes,vehicleType,price,currency:"NGN"});
+ }catch(e){return err(e)}
+};

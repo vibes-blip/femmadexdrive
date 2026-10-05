@@ -80,7 +80,7 @@ if (serverUrl && serverKey) {
 
 await check("APP_ORIGIN and Paystack callback URL match", async () => {
   if (!appOrigin || !callbackUrl || !apiBase) throw new Error("set APP_ORIGIN, PAYSTACK_CALLBACK_URL, and VITE_API_BASE_URL");
-  if (new URL(appOrigin).origin !== "https://femmadexdive.netlify.app") throw new Error("APP_ORIGIN must match the requested Netlify site");
+  if (new URL(appOrigin).origin !== "https://femmadexdrive.netlify.app") throw new Error("APP_ORIGIN must match the requested Netlify site");
   if (new URL(callbackUrl).origin !== new URL(apiBase).origin) throw new Error("callback hostname must match the Render API host");
 });
 
@@ -119,6 +119,18 @@ if (apiBase) {
       throw new Error(`expected JSON HTTP 401 for an unsigned webhook probe, received HTTP ${response.status}`);
     }
   });
+
+  await check("Render LiveKit call endpoint is deployed", async () => {
+    const response = await request(`${apiBase}/livekit-call`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "start" }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.status !== 400 || !String(data.error || "").toLowerCase().includes("authentication")) {
+      throw new Error(`expected unauthenticated JSON HTTP 400, received HTTP ${response.status}`);
+    }
+  });
 }
 
 const paystackKey = process.env.PAYSTACK_SECRET_KEY;
@@ -150,6 +162,13 @@ await check("Resend key configured and accepted", async () => {
     headers: { Authorization: `Bearer ${resendKey}` },
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
+});
+
+await check("LiveKit server credentials configured", async () => {
+  if (!process.env.LIVEKIT_URL || !process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
+    throw new Error("set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET in Render (or backend/.env locally)");
+  }
+  if (!process.env.LIVEKIT_URL.startsWith("wss://")) throw new Error("LIVEKIT_URL must use wss://");
 });
 
 await check("Render auto-completion scheduler is configured locally", async () => {
