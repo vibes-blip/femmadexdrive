@@ -5,11 +5,13 @@ const vehicle=(w,size,volume)=>{if(w>250||size==="very_large"||volume>1000000)re
 const prices={motorcycle:[Number(process.env.PRICE_BASE_MOTORCYCLE||1000),Number(process.env.PRICE_PER_KM_MOTORCYCLE||180)],car:[Number(process.env.PRICE_BASE_CAR||1800),Number(process.env.PRICE_PER_KM_CAR||250)],van:[Number(process.env.PRICE_BASE_VAN||3000),Number(process.env.PRICE_PER_KM_VAN||350)],lorry:[Number(process.env.PRICE_BASE_LORRY||6000),Number(process.env.PRICE_PER_KM_LORRY||500)]};
 const validCoordinate=value=>value!==null&&value!==undefined&&value!==""&&Number.isFinite(Number(value));
 
+
 export default async req=>{
  if(req.method==="OPTIONS")return new Response("",{status:204});
  try{
   const b=await body(req);
   if(!b.pickupCoordinates||!b.dropoffCoordinates||!validCoordinate(b.pickupCoordinates.lat)||!validCoordinate(b.pickupCoordinates.lng)||!validCoordinate(b.dropoffCoordinates.lat)||!validCoordinate(b.dropoffCoordinates.lng))throw new Error("Select both pickup and destination locations from the address results or map.");
+
   const [pickup,dropoff]=await Promise.all([
    reverseGeocode(Number(b.pickupCoordinates.lat),Number(b.pickupCoordinates.lng)),
    reverseGeocode(Number(b.dropoffCoordinates.lat),Number(b.dropoffCoordinates.lng))

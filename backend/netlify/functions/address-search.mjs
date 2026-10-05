@@ -19,6 +19,7 @@ const formatReverseAddress=item=>{
 export default async req=>{
  if(req.method==="OPTIONS")return new Response("",{status:204,headers});
  const params=new URL(req.url).searchParams,query=(params.get("q")||"").trim().slice(0,180),rawLat=params.get("lat"),rawLng=params.get("lng"),lat=rawLat===null?NaN:Number(rawLat),lng=rawLng===null?NaN:Number(rawLng),near=rawLat!==null&&rawLng!==null&&rawLat.trim()!==""&&rawLng.trim()!==""&&validPoint(lat,lng);
+
  if(!query&&!near)return reply({results:[]});
  try{
   if(!query){

@@ -14,6 +14,7 @@ This is the upgraded version of the supplied FemmaDexDrive project. It is split 
 - Signup/login through Supabase Auth.
 - Mapbox address autocomplete, reverse geocoding, and interactive maps.
 - Server-side road-distance calculation using selected coordinates.
+
 - Weight entry for large and very large parcels, plus package dimensions.
 - Motorcycle/car/van/lorry recommendation.
 - Server-side pricing so the browser cannot change the price calculation.
@@ -92,6 +93,7 @@ See `SECURITY.md`. The application uses server-side secrets, Supabase RLS, priva
 
 1. Create a Supabase project.
 2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `009_private_unassigned_delivery_locations.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
+
 3. Create/confirm your Auth settings.
 4. Create your first admin account through Supabase Auth.
 5. Run `backend/supabase/ADMIN_SETUP.sql` to promote the intended operations account, or promote its verified profile by UUID:
@@ -132,6 +134,7 @@ Server-only variables:
 - `PAYSTACK_SECRET_KEY`
 - `PAYSTACK_CALLBACK_URL`
 - `ORS_API_KEY`
+- `MAPBOX_ACCESS_TOKEN` (server-only Mapbox token with geocoding read access; used to verify selected coordinates before quoting and saving)
 - `RESEND_API_KEY`
 - `RESEND_FROM_EMAIL`
 - `ADMIN_EMAIL`
@@ -161,7 +164,8 @@ Use `femmadexdrive.netlify.app`. Set base directory `frontend`, build command `n
 
 ### Render API
 
-Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render. Set `APP_ORIGIN=https://femmadexdrive.netlify.app` and `PAYSTACK_CALLBACK_URL=https://femmadexdrive.onrender.com/api/paystack-callback`. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–009 before enabling production traffic.
+Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `MAPBOX_ACCESS_TOKEN` (a server-only Mapbox token with geocoding read access; do not expose it as a `VITE_*` variable). Set `APP_ORIGIN=https://femmadexdrive.netlify.app` and `PAYSTACK_CALLBACK_URL=https://femmadexdrive.onrender.com/api/paystack-callback`. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–009 before enabling production traffic.
+
 
 The API exposes `/health` and endpoints under `/api/`. Automatic delivery completion runs at startup and once per minute in the Render process. Locally, run `npm run dev` from `frontend/` and `npm start` from `backend/`; frontend-only browser variables belong in `frontend/.env`, while server-only variables belong in `backend/.env`.
 

@@ -5,6 +5,7 @@ const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers
 export default async req=>{
  if(req.method==="OPTIONS")return new Response("",{status:204,headers});
  const u=new URL(req.url),rawLat=u.searchParams.get("lat"),rawLng=u.searchParams.get("lng"),lat=rawLat===null||rawLat.trim()===""?NaN:Number(rawLat),lng=rawLng===null||rawLng.trim()===""?NaN:Number(rawLng);
+
  if(!Number.isFinite(lat)||lat < -90||lat>90||!Number.isFinite(lng)||lng < -180||lng>180)return reply({error:"Invalid coordinates"},400);
  try{
   return reply(await reverseGeocode(lat,lng));
