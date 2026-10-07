@@ -4,12 +4,189 @@ create extension if not exists pgcrypto;
 do $$ begin create type public.user_role as enum ('customer','rider','supervisor','admin'); exception when duplicate_object then null; end $$;
 do $$ begin create type public.rider_approval as enum ('pending','approved','rejected','suspended'); exception when duplicate_object then null; end $$;
 
+do $$
+declare
+ missing_labels text[];
+begin
+ select array_agg(required.label)
+ into missing_labels
+ from unnest(array['customer','rider','supervisor','admin']::text[]) as required(label)
+ where not exists (
+  select 1
+  from pg_enum e
+  join pg_type t on t.oid = e.enumtypid
+  join pg_namespace n on n.oid = t.typnamespace
+  where n.nspname = 'public'
+    and t.typname = 'user_role'
+    and e.enumlabel::text = required.label
+ );
+
+ if missing_labels is not null then
+  raise exception 'public.user_role is missing required labels: %', array_to_string(missing_labels, ', ');
+ end if;
+end
+$$;
+
 create table if not exists public.profiles(
  id uuid primary key references auth.users(id) on delete cascade,
  full_name text not null default '', email text, phone text,
  role public.user_role not null default 'customer',
  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
+
+-- CREATE TABLE IF NOT EXISTS does not reconcile an existing profiles table.
+-- Preserve the table and its rows while aligning the columns required below.
+alter table public.profiles
+ add column if not exists full_name text,
+ add column if not exists email text,
+ add column if not exists phone text,
+ add column if not exists role text,
+ add column if not exists created_at timestamptz,
+ add column if not exists updated_at timestamptz;
+
+update public.profiles
+set full_name = coalesce(full_name, ''),
+    created_at = coalesce(created_at, now()),
+    updated_at = coalesce(updated_at, now());
+
+alter table public.profiles
+ alter column full_name set default '',
+ alter column full_name set not null,
+ alter column created_at set default now(),
+ alter column created_at set not null,
+ alter column updated_at set default now(),
+ alter column updated_at set not null;
+
+-- Keep recognized roles, normalize case/whitespace, and map NULL/unknown values
+-- to customer before converting the existing text column to the enum.
+do $$
+declare
+ role_data_type text;
+ role_type_schema text;
+ role_type_name text;
+ role_attnum smallint;
+ role_check record;
+begin
+ select data_type, udt_schema, udt_name
+ into role_data_type, role_type_schema, role_type_name
+ from information_schema.columns
+ where table_schema = 'public'
+   and table_name = 'profiles'
+   and column_name = 'role';
+
+ if role_data_type = 'text' then
+  select attnum into role_attnum
+  from pg_attribute
+  where attrelid = 'public.profiles'::regclass
+    and attname = 'role'
+    and not attisdropped;
+
+  -- Text-based CHECK constraints can retain text operators while PostgreSQL
+  -- rewrites the column to the enum (for example role = ANY (text[])).
+  -- The enum itself enforces the complete allowed role set after conversion.
+  for role_check in
+   select c.conname, c.conkey
+   from pg_constraint c
+   where c.conrelid = 'public.profiles'::regclass
+     and c.contype = 'c'
+     and role_attnum = any(c.conkey)
+  loop
+   if cardinality(role_check.conkey) = 1 then
+    execute format(
+     'alter table public.profiles drop constraint %I',
+     role_check.conname
+    );
+   else
+    raise exception 'Cannot safely convert public.profiles.role because CHECK constraint % also depends on other columns. Review it before retrying.',
+     role_check.conname;
+   end if;
+  end loop;
+
+  alter table public.profiles alter column role drop default;
+  alter table public.profiles
+   alter column role type public.user_role
+   using (
+    case lower(btrim(role::text))
+     when 'customer' then 'customer'::public.user_role
+     when 'rider' then 'rider'::public.user_role
+     when 'supervisor' then 'supervisor'::public.user_role
+     when 'admin' then 'admin'::public.user_role
+     else 'customer'::public.user_role
+    end
+   );
+ elsif role_type_schema = 'public' and role_type_name = 'user_role' then
+  update public.profiles
+  set role = 'customer'::public.user_role
+  where role is null;
+ else
+  raise exception 'Cannot safely convert public.profiles.role: expected text or public.user_role, found %.%.',
+   coalesce(role_type_schema, 'unknown'),
+   coalesce(role_type_name, role_data_type, 'unknown');
+ end if;
+end
+$$;
+
+alter table public.profiles
+ alter column role set default 'customer'::public.user_role,
+ alter column role set not null;
+
+-- Foreign keys in the rest of this migration require a unique profiles.id.
+-- The index is only added when no primary/unique constraint already provides it.
+do $$
+begin
+ if not exists (
+  select 1
+  from pg_index i
+   join pg_attribute a on a.attrelid = i.indrelid and a.attnum = i.indkey[0]
+  where i.indrelid = 'public.profiles'::regclass
+    and i.indisunique
+     and i.indisvalid
+     and i.indpred is null
+     and i.indexprs is null
+     and i.indnkeyatts = 1
+     and a.attname = 'id'
+ ) then
+  create unique index profiles_id_compat_uidx on public.profiles(id);
+ end if;
+end
+$$;
+
+-- Add the Auth-user relationship only when existing profile IDs all resolve.
+-- Orphaned legacy rows are preserved and reported instead of being removed.
+do $$
+begin
+ if not exists (
+  select 1
+  from pg_constraint c
+  where c.conrelid = 'public.profiles'::regclass
+    and c.confrelid = 'auth.users'::regclass
+    and c.contype = 'f'
+    and c.conkey = array[
+     (select attnum from pg_attribute
+      where attrelid = 'public.profiles'::regclass
+        and attname = 'id' and not attisdropped)
+    ]::smallint[]
+    and c.confkey = array[
+     (select attnum from pg_attribute
+      where attrelid = 'auth.users'::regclass
+        and attname = 'id' and not attisdropped)
+    ]::smallint[]
+ ) then
+  if not exists (
+   select 1
+   from public.profiles p
+   left join auth.users u on u.id = p.id
+   where u.id is null
+  ) then
+   alter table public.profiles
+    add constraint profiles_id_auth_users_fkey
+    foreign key (id) references auth.users(id) on delete cascade;
+  else
+   raise notice 'Skipping profiles -> auth.users foreign key: existing profile IDs include rows with no matching Auth user. No profile rows were changed or deleted.';
+  end if;
+ end if;
+end
+$$;
 
 create table if not exists public.riders(
  id uuid primary key references public.profiles(id) on delete cascade,
@@ -84,16 +261,22 @@ begin
  requested:=coalesce(new.raw_user_meta_data->>'requested_role','customer');
  if requested not in ('customer','rider') then requested:='customer'; end if;
  insert into public.profiles(id,full_name,email,phone,role) values(new.id,coalesce(new.raw_user_meta_data->>'full_name',''),new.email,new.raw_user_meta_data->>'phone',requested::public.user_role)
- on conflict(id) do update set full_name=excluded.full_name,email=excluded.email,phone=excluded.phone;
+ on conflict(id) do nothing;
  if requested='rider' then
-  insert into public.riders(id,display_name,phone,vehicle_type,vehicle_registration) values(new.id,coalesce(new.raw_user_meta_data->>'full_name','Rider'),new.raw_user_meta_data->>'phone',new.raw_user_meta_data->>'vehicle_type',new.raw_user_meta_data->>'vehicle_registration') on conflict(id) do update set display_name=excluded.display_name,phone=excluded.phone,vehicle_type=excluded.vehicle_type,vehicle_registration=excluded.vehicle_registration;
+  insert into public.riders(id,display_name,phone,vehicle_type,vehicle_registration) values(new.id,coalesce(nullif(new.raw_user_meta_data->>'full_name',''),'Rider'),new.raw_user_meta_data->>'phone',new.raw_user_meta_data->>'vehicle_type',new.raw_user_meta_data->>'vehicle_registration')
+  on conflict(id) do nothing;
  end if;
  return new;
 end $$;
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user();
 
-create or replace function public.current_user_role() returns public.user_role language sql stable security definer set search_path=public as $$select role from public.profiles where id=auth.uid()$$;
+create or replace function public.current_user_role() returns public.user_role language sql stable security definer set search_path=public as $$
+ select coalesce(
+  (select p.role::public.user_role from public.profiles p where p.id=auth.uid()),
+  'customer'::public.user_role
+ )
+$$;
 
 create or replace function public.accept_order(p_order_id uuid) returns public.orders language plpgsql security definer set search_path=public as $$
 declare r public.orders;
@@ -139,7 +322,8 @@ create or replace function public.approve_rider(p_rider_id uuid,p_approved boole
 declare r public.riders;
 begin
  if public.current_user_role() not in ('admin','supervisor') then raise exception 'Operations access required'; end if;
- update public.riders set approval_status=case when p_approved then 'approved' else 'rejected' end where id=p_rider_id returning * into r;
+ update public.riders set approval_status=case when p_approved then 'approved'::public.rider_approval else 'rejected'::public.rider_approval end where id=p_rider_id returning * into r;
+ if r.id is null then raise exception 'Rider application not found'; end if;
  return r;
 end $$;
 
@@ -177,15 +361,29 @@ drop policy if exists chat_insert on public.chat_messages; create policy chat_in
 drop policy if exists reviews_insert on public.rider_reviews; create policy reviews_insert on public.rider_reviews for insert with check(customer_id=auth.uid() and exists(select 1 from public.orders o where o.id=order_id and o.customer_id=auth.uid() and o.rider_id=rider_id and o.status='completed'));
 
 -- Storage bucket for rider verification files. Keep it private.
-insert into storage.buckets(id,name,public) values('rider-documents','rider-documents',false) on conflict(id) do nothing;
+insert into storage.buckets(id,name,public)
+values('rider-documents','rider-documents',false)
+on conflict(id) do update set public=false;
 drop policy if exists rider_docs_insert on storage.objects;
 create policy rider_docs_insert on storage.objects for insert to authenticated with check(bucket_id='rider-documents' and (storage.foldername(name))[1]=auth.uid()::text);
 drop policy if exists rider_docs_select on storage.objects;
 create policy rider_docs_select on storage.objects for select to authenticated using(bucket_id='rider-documents' and ((storage.foldername(name))[1]=auth.uid()::text or public.current_user_role() in ('admin','supervisor')));
 
-do $$begin alter publication supabase_realtime add table public.orders; exception when duplicate_object then null; end $$;
-do $$begin alter publication supabase_realtime add table public.chat_messages; exception when duplicate_object then null; end $$;
-do $$begin alter publication supabase_realtime add table public.riders; exception when duplicate_object then null; end $$;
+do $$begin
+ if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='orders') then
+  alter publication supabase_realtime add table public.orders;
+ end if;
+end $$;
+do $$begin
+ if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='chat_messages') then
+  alter publication supabase_realtime add table public.chat_messages;
+ end if;
+end $$;
+do $$begin
+ if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='riders') then
+  alter publication supabase_realtime add table public.riders;
+ end if;
+end $$;
 
 -- After creating your own admin account, promote it once:
 -- update public.profiles set role='admin' where id='YOUR_AUTH_USER_UUID';

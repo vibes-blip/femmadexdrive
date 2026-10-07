@@ -32,7 +32,7 @@ No admin password is embedded in the project. Create the admin user in Supabase 
 - Use Paystack live credentials only in Render server environment variables.
 - Configure `APP_ORIGIN` to the exact production site origin.
 - Configure `VITE_ADMIN_HOST` to the actual admin hostname/site.
-- Apply Supabase migrations 001–005 in order and verify the role-escalation and payment-idempotency protections.
+- Apply Supabase migrations 001–010 in order and verify the role-escalation and payment-idempotency protections.
 - Verify Paystack webhook delivery and signature validation before accepting live orders.
 - Test customer, rider and admin RLS separately.
 - Keep Supabase, Netlify, Render and Paystack accounts protected with MFA.

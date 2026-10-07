@@ -9,18 +9,22 @@ declare
   role_expression text;
   changed_rows integer;
 begin
-  select t.typtype = 'e' and n.nspname = 'public' and t.typname = 'user_role'
-    into role_is_enum
-  from pg_attribute a
-  join pg_class c on c.oid = a.attrelid
-  join pg_namespace cn on cn.oid = c.relnamespace
-  join pg_type t on t.oid = a.atttypid
-  join pg_namespace n on n.oid = t.typnamespace
-  where cn.nspname = 'public' and c.relname = 'profiles'
-    and a.attname = 'role' and not a.attisdropped;
+  select exists (
+    select 1
+    from information_schema.columns c
+    join pg_type t on t.typname = c.udt_name
+    join pg_namespace n on n.oid = t.typnamespace
+    where c.table_schema = 'public'
+      and c.table_name = 'profiles'
+      and c.column_name = 'role'
+      and c.udt_schema = 'public'
+      and c.udt_name = 'user_role'
+      and t.typtype = 'e'
+      and n.nspname = 'public'
+  ) into role_is_enum;
 
-  if role_is_enum is null then
-    raise exception 'public.profiles.role was not found. Apply the profile schema first.';
+  if not role_is_enum then
+    raise exception 'public.profiles.role must use public.user_role. Apply migrations 001 through 010 first.';
   end if;
 
   for test_user in
@@ -30,14 +34,12 @@ begin
       ('femmadexmanagement@gmail.com', 'FemmaDex Management', 'admin')
     ) as users(email, full_name, role_name)
   loop
-    role_expression := quote_literal(test_user.role_name);
-    if role_is_enum then role_expression := role_expression || '::public.user_role'; end if;
+    role_expression := quote_literal(test_user.role_name) || '::public.user_role';
 
     execute format(
       'insert into public.profiles (id, email, full_name, role) '
       || 'select id, email, %L, %s from auth.users where lower(email) = lower(%L) '
-      || 'on conflict (id) do update set email = excluded.email, '
-      || 'full_name = excluded.full_name, role = excluded.role',
+      || 'on conflict (id) do update set email = excluded.email, role = excluded.role',
       test_user.full_name, role_expression, test_user.email
     );
 
@@ -50,7 +52,7 @@ end
 $$;
 
 -- Ensure the existing rider Auth user has a pending rider row if the signup
--- trigger did not create one. Never overwrite an existing vehicle/application.
+-- trigger did not create one. Never overwrite existing application details.
 insert into public.riders (id, display_name, approval_status)
 select p.id, coalesce(nullif(p.full_name, ''), p.email, 'FemmaDex Rider'), 'pending'
 from public.profiles p
@@ -58,7 +60,7 @@ where lower(p.email) = lower('vibestechwold@gmail.com')
   and p.role::text = 'rider'
 on conflict (id) do nothing;
 
--- Keep the test rider pending. Admin approval is required before dispatch access.
+-- The test rider remains pending until explicitly approved by an admin.
 select p.id, p.email, p.role::text as role, r.approval_status
 from public.profiles p
 left join public.riders r on r.id = p.id

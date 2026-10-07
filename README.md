@@ -83,7 +83,7 @@ Do not replace this with a browser-provided distance. The backend recalculates i
 
 ## Admin account and password
 
-No admin password is stored in this project. Create the one operations account in Supabase Auth with your chosen strong password, then run `backend/supabase/ADMIN_SETUP.sql` to promote `femmadexmanagement@gmail.com` to the `admin` role. The frontend does not expose a password or admin secret.
+No admin password is stored in this project. Create the operations account in Supabase Auth, then run `backend/supabase/ADMIN_SETUP.sql` to create or repair its profile and promote the configured UID/email to the `admin` role. The script verifies that the Auth user exists and that its email matches. The frontend does not expose a password or admin secret.
 
 ## Security
 
@@ -92,13 +92,12 @@ See `SECURITY.md`. The application uses server-side secrets, Supabase RLS, priva
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `009_private_unassigned_delivery_locations.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
+2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `010_fix_rider_approval_enum.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
 
 3. Create/confirm your Auth settings.
 4. Create your first admin account through Supabase Auth.
-5. Run `backend/supabase/ADMIN_SETUP.sql` to promote the intended operations account, or promote its verified profile by UUID:
-
-`update public.profiles set role='admin' where id='YOUR_AUTH_USER_UUID';`
+5. Run `backend/supabase/VERIFY_SCHEMA.sql`. Confirm every row reports `installed = true` before proceeding.
+6. Run `backend/supabase/ADMIN_SETUP.sql` to create or repair the intended operations account's profile and promote it by its configured Auth UUID.
 
 Do not put the admin password in source code.
 
@@ -164,14 +163,14 @@ Use `femmadexdrive.netlify.app`. Set base directory `frontend`, build command `n
 
 ### Render API
 
-Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `MAPBOX_ACCESS_TOKEN` (a server-only Mapbox token with geocoding read access; do not expose it as a `VITE_*` variable). Set `APP_ORIGIN=https://femmadexdrive.netlify.app` and `PAYSTACK_CALLBACK_URL=https://femmadexdrive.onrender.com/api/paystack-callback`. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–009 before enabling production traffic.
+Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `MAPBOX_ACCESS_TOKEN` (a server-only Mapbox token with geocoding read access; do not expose it as a `VITE_*` variable). Set `APP_ORIGIN=https://femmadexdrive.netlify.app` and `PAYSTACK_CALLBACK_URL=https://femmadexdrive.onrender.com/api/paystack-callback`. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–010 before enabling production traffic.
 
 
 The API exposes `/health` and endpoints under `/api/`. Automatic delivery completion runs at startup and once per minute in the Render process. Locally, run `npm run dev` from `frontend/` and `npm start` from `backend/`; frontend-only browser variables belong in `frontend/.env`, while server-only variables belong in `backend/.env`.
 
 For voice calls, set `LIVEKIT_URL=wss://femmadexdrive-8px9a45n.livekit.cloud`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in Render only. The authenticated API checks delivery participation and issues short-lived, microphone-only room tokens. Never put the API secret in a `VITE_*` variable or source control. Browsers must grant microphone access.
 
-Netlify production builds do not read local `.env` files. Configure browser variables in Netlify and server variables in Render, then redeploy both services. Never place Supabase server secrets or Paystack keys in `VITE_*` variables.
+Netlify production builds do not read local `.env` files. Configure browser variables in Netlify and server variables in Render, then redeploy both services. For address search and interactive maps, `VITE_MAPBOX_TOKEN` must be a valid public Mapbox token with the website's production and local development origins allowed in its URL restrictions. `MAPBOX_ACCESS_TOKEN` and `ORS_API_KEY` must also be configured in Render for server-side geocoding and road routing. Never place Supabase server secrets or Paystack keys in `VITE_*` variables.
 
 Run `npm run check:live` from `frontend/` before deployment. It checks Supabase Auth, database tables, Paystack key acceptance, routing/email credentials, Netlify and Render reachability, CORS, and callback URL consistency. These read-only probes do not initialize a payment or send email.
 
@@ -187,7 +186,7 @@ The required environment variables must be configured before real Supabase/Payst
 
 ## Customer and rider test accounts
 
-Accounts are real Supabase Auth users. Create/confirm the customer, rider, and permanent admin accounts in Supabase Auth, then run `backend/supabase/TEST_ACCOUNTS_SETUP.sql` to sync `profiles.role` by email. It never creates Auth accounts or changes passwords. Login routes each account by its database role. The SQL explicitly auto-approves and sets online only the named test rider so it can accept test deliveries; remove that test-only update before using the setup script for live rider onboarding. Other new riders remain pending until approved. Set/change passwords in Supabase Auth only, never in SQL or source.
+Accounts are real Supabase Auth users. Create/confirm the customer, rider, and permanent admin accounts in Supabase Auth, then run `backend/supabase/TEST_ACCOUNTS_SETUP.sql` to sync `profiles.role` by email. It never creates Auth accounts or changes passwords, and preserves existing profile names and rider application details. Login routes each account by its database role. The setup leaves the test rider pending; approve the rider from the admin dashboard before testing dispatch. Set/change passwords in Supabase Auth only, never in SQL or source.
 
 ## Important production checks before accepting real customers
 
