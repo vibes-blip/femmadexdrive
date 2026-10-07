@@ -1,13 +1,12 @@
 let requestQueue=Promise.resolve();
 let lastRequestAt=0;
-const mapboxToken=(process.env.MAPBOX_ACCESS_TOKEN||"").trim();
 
 export function fetchGeocoding(url){
  const request=requestQueue.then(async()=>{
   const delay=Math.max(0,1100-(Date.now()-lastRequestAt));
   if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
   lastRequestAt=Date.now();
-  return fetch(url,{headers:{"User-Agent":"FemmaDexDrive/2.0 contact:femmadexmanagement@gmail.com"}});
+  return fetch(url,{headers:{"User-Agent":"FemmaDexDrive/2.2 contact:femmadexmanagement@gmail.com","Accept-Language":"en"}});
  });
  requestQueue=request.then(()=>undefined,()=>undefined);
  return request;
@@ -18,20 +17,14 @@ export async function reverseGeocode(lat,lng){
  lat=Number(lat);
  lng=Number(lng);
 
- if(mapboxToken){
-  const endpoint=new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json`);
-  endpoint.searchParams.set("language","en");
-  endpoint.searchParams.set("limit","1");
-  endpoint.searchParams.set("types","address,poi,place,locality,neighborhood,district");
-  endpoint.searchParams.set("access_token",mapboxToken);
-  const response=await fetch(endpoint);
-  if(!response.ok)throw new Error("Mapbox address verification is temporarily unavailable.");
-  const data=await response.json(),feature=data.features?.find(item=>typeof item.place_name==="string"&&item.place_name.trim());
-  if(!feature)throw new Error("No readable street or place name was found for this point. Move the pin to a nearby road or landmark.");
-  return {title:feature.text||feature.place_name.trim(),details:"",address:feature.place_name.trim(),lat,lng};
- }
-
- const response=await fetchGeocoding(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
+ const endpoint=new URL("https://nominatim.openstreetmap.org/reverse");
+ endpoint.searchParams.set("format","jsonv2");
+ endpoint.searchParams.set("lat",String(lat));
+ endpoint.searchParams.set("lon",String(lng));
+ endpoint.searchParams.set("zoom","18");
+ endpoint.searchParams.set("addressdetails","1");
+ endpoint.searchParams.set("accept-language","en");
+ const response=await fetchGeocoding(endpoint);
  if(!response.ok)throw new Error("Address lookup is temporarily unavailable.");
  const item=await response.json(),parts=item.address||{},street=[parts.house_number,parts.road].filter(Boolean).join(" "),title=item.name||parts.amenity||parts.shop||parts.tourism||parts.leisure||parts.building||street||parts.neighbourhood||parts.suburb||parts.village||parts.town||parts.city||parts.county;
  const locality=[street,parts.neighbourhood,parts.suburb,parts.village,parts.town,parts.city,parts.state,parts.country].filter((part,index,all)=>part&&all.indexOf(part)===index&&part!==title);

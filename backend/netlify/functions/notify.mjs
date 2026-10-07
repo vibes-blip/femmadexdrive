@@ -18,7 +18,7 @@ const sendEmail=async(to,subject,html)=>{
 };
 
 export const sendAdmin=async(subject,html)=>{
- if(!process.env.RESEND_API_KEY)return;
+ if(!process.env.RESEND_API_KEY)throw new Error("Operations email is not configured (RESEND_API_KEY is missing).");
  const response=await fetch("https://api.resend.com/emails",{
   method:"POST",
   headers:{"Authorization":`Bearer ${process.env.RESEND_API_KEY}`,"Content-Type":"application/json"},
@@ -39,7 +39,41 @@ export default async req=>{
   if(request.type==="new_delivery"){
    const {data:order,error}=await db.from("orders").select("*").eq("id",request.orderId).eq("customer_id",user.id).single();
    if(error||!order)throw new Error("Delivery not found");
-   await sendAdmin(`New FEMADEXDRIVE delivery ${order.tracking_number}`,`<h2>New delivery</h2><p><b>Tracking:</b> ${order.tracking_number}</p><p><b>Customer:</b> ${user.user_metadata?.full_name||"Customer"}</p><p><b>Pickup:</b> ${order.pickup_address}</p><p><b>Destination:</b> ${order.dropoff_address}</p><p><b>Package:</b> ${order.goods_description}</p><p><b>Weight:</b> ${order.weight_kg||"—"} kg</p><p><b>Vehicle:</b> ${order.vehicle_type}</p><p><b>Distance:</b> ${order.distance_km} km</p><p><b>Price:</b> ₦${Number(order.final_price).toLocaleString()}</p>`);
+   const {data:quote,error:quoteError}=await db.from("delivery_quote_reviews")
+    .select("suggested_price,requires_manual_review")
+    .eq("order_id",order.id)
+    .maybeSingle();
+   if(quoteError)throw quoteError;
+   const dimensions=[order.length_cm,order.width_cm,order.height_cm].some(value=>value!==null&&value!==undefined)
+    ?`${order.length_cm||"—"} × ${order.width_cm||"—"} × ${order.height_cm||"—"} cm`
+    :"—";
+   const point=(lat,lng)=>lat!==null&&lat!==undefined&&lat!==""&&lng!==null&&lng!==undefined&&lng!==""&&Number.isFinite(Number(lat))&&Number.isFinite(Number(lng))?`${Number(lat)}, ${Number(lng)}`:"—";
+   const field=(label,value)=>`<p><b>${label}:</b> ${escapeHtml(value||"—")}</p>`;
+   await sendAdmin(
+    `New FEMADEXDRIVE delivery ${order.tracking_number}`,
+    `<h2>New delivery</h2>
+     ${field("Tracking",order.tracking_number)}
+     ${field("Customer",user.user_metadata?.full_name||"Customer")}
+     ${field("Customer email",user.email)}
+     ${field("Customer phone",user.user_metadata?.phone)}
+     ${field("Pickup",order.pickup_address)}
+     ${field("Pickup coordinates",point(order.pickup_latitude,order.pickup_longitude))}
+     ${field("Destination",order.dropoff_address)}
+     ${field("Destination coordinates",point(order.dropoff_latitude,order.dropoff_longitude))}
+     ${field("Recipient",order.recipient_name)}
+     ${field("Recipient phone",order.recipient_phone)}
+     ${field("Package",order.goods_description)}
+     ${field("Package size",order.package_size)}
+     ${field("Weight",order.weight_kg?`${order.weight_kg} kg`:"—")}
+     ${field("Dimensions",dimensions)}
+     ${field("Vehicle",order.vehicle_type)}
+     ${field("Road distance",order.distance_km?`${order.distance_km} km`:"—")}
+     ${field("Estimated drive time",order.duration_minutes?`${order.duration_minutes} minutes`:"—")}
+     ${field("System suggested price",quote?`₦${Number(quote.suggested_price).toLocaleString()}`:"Awaiting operations review")}
+     ${field("Manual review required",quote?.requires_manual_review?"Yes":"No")}
+     ${field("Status",order.status)}
+     <p>Review and manage this delivery in the operations dashboard.</p>`
+   );
   }else if(request.type==="new_customer"||request.type==="new_rider"){
    const role=request.type==="new_rider"?"Rider application":"Customer signup";
    await sendAdmin(`FEMADEXDRIVE ${role}`,`<h2>${role}</h2><p><b>Name:</b> ${user.user_metadata?.full_name||"—"}</p><p><b>Email:</b> ${user.email||"—"}</p><p><b>Phone:</b> ${user.user_metadata?.phone||"—"}</p><p><b>Role:</b> ${request.type==="new_rider"?"rider":"customer"}</p><p><b>Time:</b> ${new Date().toISOString()}</p>`);

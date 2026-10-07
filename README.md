@@ -12,13 +12,14 @@ This is the upgraded version of the supplied FemmaDexDrive project. It is split 
 ### Customer
 
 - Signup/login through Supabase Auth.
-- Mapbox address autocomplete, reverse geocoding, and interactive maps.
-- Server-side road-distance calculation using selected coordinates.
+- OpenStreetMap address search and reverse geocoding through Nominatim, with MapLibre GL JS interactive maps.
+- Server-side OpenRouteService driving distance and ETA from the selected coordinates.
 
 - Weight entry for large and very large parcels, plus package dimensions.
 - Motorcycle/car/van/lorry recommendation.
-- Server-side pricing so the browser cannot change the price calculation.
-- Recipient name/address capture and admin-adjustable final price before payment.
+- Suggested delivery quotes are stored without exposing the suggested amount to customers.
+- Admin/supervisor price approval or adjustment is audited before payment is enabled.
+- Paystack checkout uses the approved amount read from Supabase on the server.
 - Real Paystack checkout redirect.
 - Payment is only considered paid after Paystack verification/webhook.
 - Permanent tracking number.
@@ -92,7 +93,7 @@ See `SECURITY.md`. The application uses server-side secrets, Supabase RLS, priva
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `010_fix_rider_approval_enum.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
+2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `011_delivery_quote_review.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
 
 3. Create/confirm your Auth settings.
 4. Create your first admin account through Supabase Auth.
@@ -133,7 +134,6 @@ Server-only variables:
 - `PAYSTACK_SECRET_KEY`
 - `PAYSTACK_CALLBACK_URL`
 - `ORS_API_KEY`
-- `MAPBOX_ACCESS_TOKEN` (server-only Mapbox token with geocoding read access; used to verify selected coordinates before quoting and saving)
 - `RESEND_API_KEY`
 - `RESEND_FROM_EMAIL`
 - `ADMIN_EMAIL`
@@ -159,18 +159,20 @@ The root `netlify.toml` builds and serves the frontend only. The API runs separa
 
 ### Netlify frontend
 
-Use `femmadexdrive.netlify.app`. Set base directory `frontend`, build command `npm install --no-audit --no-fund && npm run build`, and publish directory `dist`. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_BASE_URL=https://femmadexdrive.onrender.com/api`, `VITE_ADMIN_HOST=femmadexdrive.netlify.app`, and `VITE_MAPBOX_TOKEN` (a public Mapbox token restricted to the site and local development origins) in Netlify's build environment.
+Use `femmadexdrive.netlify.app`. Set base directory `frontend`, build command `npm install --no-audit --no-fund && npm run build`, and publish directory `dist`. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_BASE_URL=https://femmadexdrive.onrender.com/api`, and `VITE_ADMIN_HOST=femmadexdrive.netlify.app` in Netlify's build environment. Map tiles and address lookup use OpenStreetMap/Nominatim and do not require a Mapbox token.
 
 ### Render API
 
-Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `MAPBOX_ACCESS_TOKEN` (a server-only Mapbox token with geocoding read access; do not expose it as a `VITE_*` variable). Set `APP_ORIGIN=https://femmadexdrive.netlify.app` and `PAYSTACK_CALLBACK_URL=https://femmadexdrive.onrender.com/api/paystack-callback`. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–010 before enabling production traffic.
+Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `ORS_API_KEY` for OpenRouteService road routing. Set `APP_ORIGIN=https://femmadexdrive.netlify.app` and `PAYSTACK_CALLBACK_URL=https://femmadexdrive.onrender.com/api/paystack-callback`. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–011 before enabling production traffic.
 
 
 The API exposes `/health` and endpoints under `/api/`. Automatic delivery completion runs at startup and once per minute in the Render process. Locally, run `npm run dev` from `frontend/` and `npm start` from `backend/`; frontend-only browser variables belong in `frontend/.env`, while server-only variables belong in `backend/.env`.
 
 For voice calls, set `LIVEKIT_URL=wss://femmadexdrive-8px9a45n.livekit.cloud`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in Render only. The authenticated API checks delivery participation and issues short-lived, microphone-only room tokens. Never put the API secret in a `VITE_*` variable or source control. Browsers must grant microphone access.
 
-Netlify production builds do not read local `.env` files. Configure browser variables in Netlify and server variables in Render, then redeploy both services. For address search and interactive maps, `VITE_MAPBOX_TOKEN` must be a valid public Mapbox token with the website's production and local development origins allowed in its URL restrictions. `MAPBOX_ACCESS_TOKEN` and `ORS_API_KEY` must also be configured in Render for server-side geocoding and road routing. Never place Supabase server secrets or Paystack keys in `VITE_*` variables.
+Netlify production builds do not read local `.env` files. Configure browser variables in Netlify and server variables in Render, then redeploy both services. Maps and geocoding use OpenStreetMap, MapLibre GL JS, and Nominatim; no Mapbox token is needed. Keep `ORS_API_KEY` configured in Render for server-side road distance and ETA calculations. Never place Supabase server secrets, Paystack keys, or the ORS key in `VITE_*` variables.
+
+New delivery requests are calculated through the authenticated `/api/quote` endpoint using the OpenRouteService `driving-car/geojson` route. The backend prices the route at ₦1,500 base fare, first 5 km included, ₦150/km after that, and a ₦2,000 minimum, plus ₦500 for medium and ₦1,000 for large/very-large packages. Quotes await admin/supervisor review; only the approved amount is available to customer checkout. Apply migration 011 before using the updated quote flow.
 
 Run `npm run check:live` from `frontend/` before deployment. It checks Supabase Auth, database tables, Paystack key acceptance, routing/email credentials, Netlify and Render reachability, CORS, and callback URL consistency. These read-only probes do not initialize a payment or send email.
 

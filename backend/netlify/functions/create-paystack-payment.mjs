@@ -42,15 +42,35 @@ export default async req=>{
     const user=await userFromRequest(req), b=await body(req), db=sb();
     const {data:o,error}=await db.from("orders").select("id,tracking_number,customer_id,final_price,status,payment_status").eq("id",b.orderId).eq("customer_id",user.id).maybeSingle();
     if(error||!o) throw new Error("Delivery not found");
-    if(o.status!=="awaiting_payment"||o.payment_status!=="unpaid") throw new Error("Operations has not released this delivery for payment yet");
-    if(Number(o.final_price)<=0) throw new Error("Invalid delivery price");
+    const {data:quote,error:quoteError}=await db.from("delivery_quote_reviews")
+      .select("approved_price,status,expires_at")
+      .eq("order_id",o.id)
+      .eq("customer_id",user.id)
+      .maybeSingle();
+    if(quoteError) throw quoteError;
+    const isReviewedQuote=Boolean(quote);
+    if(isReviewedQuote){
+      if(quote.status!=="approved"||o.status!=="approved"||o.payment_status!=="unpaid") {
+        throw new Error("Operations has not approved this delivery quote for payment");
+      }
+      if(!quote.approved_price||Number(quote.approved_price)<=0||Number(quote.approved_price)!==Number(o.final_price)) {
+        throw new Error("The approved delivery price is invalid. Contact operations.");
+      }
+      if(!quote.expires_at||new Date(quote.expires_at).getTime()<=Date.now()) {
+        throw new Error("This approved delivery quote has expired. Please request a new quote.");
+      }
+    }else if(o.status!=="awaiting_payment"||o.payment_status!=="unpaid"){
+      throw new Error("Operations has not released this delivery for payment yet");
+    }
+    const approvedPrice=isReviewedQuote?Number(quote.approved_price):Number(o.final_price);
+    if(!Number.isFinite(approvedPrice)||approvedPrice<=0) throw new Error("Invalid delivery price");
 
     const {data:pending,error:pendingError}=await db.from("payments").select("id").eq("order_id",o.id).eq("status","pending").maybeSingle();
     if(pendingError) throw pendingError;
     if(pending) throw new Error("A payment is already in progress for this delivery. Wait for its status before trying again.");
 
     const reference=`FDD-${o.tracking_number}-${crypto.randomUUID().slice(0,8)}`;
-    const {data:p,error:pe}=await db.from("payments").insert({order_id:o.id,customer_id:user.id,amount:o.final_price,currency:"NGN",status:"pending",reference}).select("*").single();
+    const {data:p,error:pe}=await db.from("payments").insert({order_id:o.id,customer_id:user.id,amount:approvedPrice,currency:"NGN",status:"pending",reference}).select("*").single();
     if(pe){
       if(pe.code==="23505") throw new Error("A payment is already in progress for this delivery. Wait for its status before trying again.");
       throw pe;
@@ -63,7 +83,7 @@ export default async req=>{
       d=await paystack("/transaction/initialize",{
         method:"POST",
         body:JSON.stringify({
-          amount:Math.round(Number(o.final_price)*100),
+          amount:Math.round(approvedPrice*100),
           email:user.email,
           currency:"NGN",
           reference,
