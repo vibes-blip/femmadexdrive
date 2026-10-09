@@ -1,4 +1,4 @@
-import React,{useEffect,useId,useRef,useState} from "react";
+import React,{useCallback,useEffect,useId,useRef,useState} from "react";
 import * as maplibregl from "maplibre-gl";
 import {Clock3,LocateFixed,MapPin,Navigation,Search,X} from "lucide-react";
 import {apiUrl} from "./api.js";
@@ -9,9 +9,7 @@ const OSM_STYLE={
   openstreetmap:{
    type:"raster",
    tiles:[
-    "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png"
+    "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
    ],
    tileSize:256,
    attribution:"© <a href='https://www.openstreetmap.org/copyright' target='_blank' rel='noopener noreferrer'>OpenStreetMap contributors</a>"
@@ -81,6 +79,8 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
  const [focused,setFocused]=useState(false);
  const [error,setError]=useState("");
  const [mapOpen,setMapOpen]=useState(false);
+ const selectionVersion=useRef(0);
+ const selectionBusy=useRef(false);
 
  useEffect(()=>{
   const query=value.trim();
@@ -117,10 +117,14 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
  },[value,near]);
 
  const choose=async point=>{
+  if(selectionBusy.current)return false;
+  selectionBusy.current=true;
+  const version=++selectionVersion.current;
   setSelecting(true);
   setError("");
   try{
    const selected=await reverseGeocode(point.lat,point.lng);
+   if(version!==selectionVersion.current)return false;
    onSelect(selected.address,{lat:selected.lat,lng:selected.lng});
    setRecent(current=>{
     const next=[selected,...current.filter(item=>item.address!==selected.address)].slice(0,6);
@@ -131,11 +135,25 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
    setFocused(false);
    return true;
   }catch(selectionError){
-   setError(selectionError.message);
+   if(version===selectionVersion.current){
+    setError(selectionError.message.includes("No readable address")
+     ?"No readable address was returned. The selected map coordinates are unchanged; retry address verification or move the pin to a nearby mapped street or landmark."
+     :`Address verification failed. The selected map coordinates are unchanged; retry verification. ${selectionError.message}`);
+   }
    return false;
   }finally{
-   setSelecting(false);
+   if(version===selectionVersion.current){
+    selectionBusy.current=false;
+    setSelecting(false);
+   }
   }
+ };
+
+ const changeAddress=value=>{
+  selectionVersion.current++;
+  selectionBusy.current=false;
+  setSelecting(false);
+  onChange(value);
  };
 
  const searchNearby=()=>{
@@ -157,7 +175,7 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
   <div className="address-field">
    <label htmlFor={inputId}>{label}</label>
    <div className="address"><MapPin size={17}/>
-    <input id={inputId} required value={value} onFocus={()=>setFocused(true)} onBlur={()=>setTimeout(()=>setFocused(false),160)} onChange={event=>onChange(event.target.value)} placeholder="Type a street, place or landmark"/>
+    <input id={inputId} required value={value} onFocus={()=>setFocused(true)} onBlur={()=>setTimeout(()=>setFocused(false),160)} onChange={event=>changeAddress(event.target.value)} placeholder="Type a street, place or landmark"/>
     <button type="button" aria-label="Use current location" onClick={locate}>{locating?<span className="spinner small"/>:<LocateFixed size={16}/>}</button>
     <button type="button" aria-label="Choose location on map" onClick={()=>setMapOpen(true)}><Navigation size={16}/></button>
    </div>
@@ -183,9 +201,23 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
  const [results,setResults]=useState([]);
  const [loading,setLoading]=useState(false);
  const [searching,setSearching]=useState(false);
- const [hasSelection,setHasSelection]=useState(Boolean(initialCoordinates&&validPoint(initialCoordinates.lat,initialCoordinates.lng)));
+ const [selectedPoint,setSelectedPoint]=useState(()=>initialCoordinates&&validPoint(initialCoordinates.lat,initialCoordinates.lng)
+  ?{lat:Number(initialCoordinates.lat),lng:Number(initialCoordinates.lng)}
+  :null);
  const [selectedAddress,setSelectedAddress]=useState("");
  const [error,setError]=useState("");
+ const [mapError,setMapError]=useState("");
+ const loadingRef=useRef(loading);
+ loadingRef.current=loading;
+
+ const handleMarkerDrag=useCallback(()=>{
+  if(loadingRef.current)return;
+  const point=marker.current?.getLngLat();
+  if(!point)return;
+  setSelectedPoint({lat:point.lat,lng:point.lng});
+  setSelectedAddress("");
+  setError("");
+ },[]);
 
  useEffect(()=>{
   if(!container.current)return;
@@ -205,34 +237,40 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
      marker.current=new maplibregl.Marker({color:"#6d28d9",draggable:true})
       .setLngLat([initialCoordinates.lng,initialCoordinates.lat])
       .addTo(instance);
-     marker.current.on("dragend",()=>setHasSelection(true));
+     marker.current.on("dragend",handleMarkerDrag);
     }
    });
    instance.on("click",event=>{
+    if(loadingRef.current)return;
     const point={lat:event.lngLat.lat,lng:event.lngLat.lng};
     if(marker.current)marker.current.setLngLat([point.lng,point.lat]);
     else{
      marker.current=new maplibregl.Marker({color:"#6d28d9",draggable:true})
       .setLngLat([point.lng,point.lat])
       .addTo(instance);
-     marker.current.on("dragend",()=>setHasSelection(true));
+     marker.current.on("dragend",handleMarkerDrag);
     }
-    setHasSelection(true);
+    setSelectedPoint(point);
     setSelectedAddress("");
     setError("");
    });
    instance.on("error",event=>{
-    if(event.error)setError("OpenStreetMap tiles could not be loaded. Check your internet connection.");
+    if(event.error){
+     const sourceIsTiles=event.sourceId==="openstreetmap"||event.tile||/tile\.openstreetmap\.org|tile/i.test(event.error.message||"");
+     setMapError(sourceIsTiles
+      ?"Map tiles could not be loaded. Check your connection and retry."
+      :"The map could not finish loading. You can still search for a location or retry.");
+    }
    });
   }catch(mapError){
-   setError(mapError.message||"The map could not be opened.");
+   setMapError(mapError.message||"The map could not be opened.");
   }
   return()=>{
    map.current=null;
    marker.current=null;
    instance?.remove();
   };
- },[initialCoordinates]);
+ },[initialCoordinates,handleMarkerDrag]);
 
  useEffect(()=>{
   const text=query.trim();
@@ -260,15 +298,16 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
 
  const placeMarker=(point,address)=>{
   if(!map.current||!validPoint(point.lat,point.lng))return;
-  map.current.flyTo({center:[point.lng,point.lat],zoom:16});
-  if(marker.current)marker.current.setLngLat([point.lng,point.lat]);
+  const selected={lat:Number(point.lat),lng:Number(point.lng)};
+  map.current.flyTo({center:[selected.lng,selected.lat],zoom:16});
+  if(marker.current)marker.current.setLngLat([selected.lng,selected.lat]);
   else{
    marker.current=new maplibregl.Marker({color:"#6d28d9",draggable:true})
-    .setLngLat([point.lng,point.lat])
+    .setLngLat([selected.lng,selected.lat])
     .addTo(map.current);
-   marker.current.on("dragend",()=>{setHasSelection(true);setSelectedAddress("")});
+   marker.current.on("dragend",handleMarkerDrag);
   }
-  setHasSelection(true);
+  setSelectedPoint(selected);
   setSelectedAddress(address||"");
   setResults([]);
   setError("");
@@ -288,13 +327,15 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
  };
 
  const confirm=async()=>{
-  const point=marker.current?.getLngLat();
-  if(!hasSelection||!point){setError("Search for an address or select a point on the map first.");return}
+  if(!selectedPoint||!validPoint(selectedPoint.lat,selectedPoint.lng)){setError("Search for an address or select a point on the map first.");return}
   setLoading(true);
   setError("");
   try{
-   const verified=await onSelect({lat:point.lat,lng:point.lng});
-   if(verified===false)return;
+   const verified=await onSelect(selectedPoint);
+   if(verified===false){
+    setError("The selected coordinates remain on the map, but the address could not be verified. Retry address verification or move the pin.");
+    return;
+   }
    onClose();
   }catch(selectionError){
    setError(selectionError.message);
@@ -303,15 +344,17 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
   }
  };
 
- return <div className="modal map-modal" onClick={onClose}>
+ return <div className="modal map-modal" onClick={event=>{if(!loading&&event.target===event.currentTarget)onClose()}}>
   <section className="map-card osm-map-card" onClick={event=>event.stopPropagation()}>
-   <div className="map-heading"><div><b>Choose a location</b><small>Search for an address or click and move the pin to the exact point.</small></div><button className="close" onClick={onClose} aria-label="Close map"><X/></button></div>
-   <div className="osm-map-search"><div className="search"><input aria-label="Search map addresses" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search streets, places or landmarks"/><button type="button" className="secondary" onClick={useCurrentLocation} disabled={loading}><LocateFixed size={16}/> My location</button></div>   {searching&&<small className="address-hint">Searching OpenStreetMap…</small>}{query.trim().length>=3&&!searching&&!error&&results.length===0&&<small className="address-hint">No matching addresses found.</small>}{results.length>0&&<div className="address-suggestions osm-map-results" role="listbox" aria-label="Map search results">{results.map(point=><button key={`${point.lat}-${point.lng}`} type="button" role="option" onClick={()=>placeMarker(point,point.address)}><MapPin size={15}/><span><b>{point.title}</b><small>{point.address}</small></span></button>)}</div>}</div>
-   <div className="osm-map-canvas" ref={container} aria-label="Interactive OpenStreetMap location map"/>
+   <div className="map-heading"><div><b>Choose a location</b><small>Search for an address or click and move the pin to the exact point.</small></div><button className="close" onClick={onClose} aria-label="Close map" disabled={loading}><X/></button></div>
+   <div className="osm-map-search"><div className="search"><input aria-label="Search map addresses" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search streets, places or landmarks" disabled={loading}/><button type="button" className="secondary" onClick={useCurrentLocation} disabled={loading}><LocateFixed size={16}/> My location</button></div>   {searching&&<small className="address-hint">Searching OpenStreetMap…</small>}{query.trim().length>=3&&!searching&&!error&&results.length===0&&<small className="address-hint">No matching addresses found.</small>}{results.length>0&&<div className="address-suggestions osm-map-results" role="listbox" aria-label="Map search results">{results.map(point=><button key={`${point.lat}-${point.lng}`} type="button" role="option" disabled={loading} onClick={()=>placeMarker(point,point.address)}><MapPin size={15}/><span><b>{point.title}</b><small>{point.address}</small></span></button>)}</div>}</div>
+   <div className="osm-map-canvas" ref={container} aria-label="Interactive OpenStreetMap location map" style={loading?{pointerEvents:"none"}:undefined}/>
+   {selectedPoint&&<small className="address-hint">Selected coordinates: {selectedPoint.lat.toFixed(6)}, {selectedPoint.lng.toFixed(6)}</small>}
    {selectedAddress&&<p className="map-selected-address"><MapPin size={15}/>{selectedAddress}</p>}
+   {mapError&&<div className="address-error" role="alert">{mapError}</div>}
    {error&&<div className="address-error" role="alert">{error}</div>}
-   {!hasSelection&&<small className="address-hint">No location is selected yet. Choose a search result or click the map.</small>}
-   <div className="map-actions"><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={loading||!hasSelection} onClick={confirm}>{loading?"Verifying address…":"Use this location"}</button></div>
+   {!selectedPoint&&<small className="address-hint">No location is selected yet. Choose a search result or click the map.</small>}
+   <div className="map-actions"><button className="secondary" onClick={onClose} disabled={loading}>Cancel</button><button className="primary" disabled={loading||!selectedPoint} onClick={confirm}>{loading?"Verifying address…":"Use this location"}</button></div>
   </section>
  </div>;
 }
