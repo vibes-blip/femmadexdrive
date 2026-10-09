@@ -5,3 +5,9 @@
 
 [build.environment]
   VITE_API_BASE_URL = "https://femmadexdrive.onrender.com/api"
+
+[[redirects]]
+  from = "/.netlify/functions/paystack-callback"
+  to = "https://femmadexdrive.onrender.com/api/paystack-callback"
+  status = 307
+  force = true

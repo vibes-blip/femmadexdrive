@@ -58,7 +58,6 @@ The backend uses Paystack's server-side Checkout Redirect flow. The secret key i
 Required Render server variables:
 
 - `PAYSTACK_SECRET_KEY`
-- `PAYSTACK_CALLBACK_URL`
 
 For live payments, use your Paystack live secret key. During development, use the appropriate Paystack test credentials.
 
@@ -68,7 +67,7 @@ Paystack's webhook endpoint must be publicly reachable. Configure the Paystack w
 
 The redirect URL is:
 
-`https://femmadexdrive.netlify.app/payment-result` (the Render callback redirects here after verification)
+Paystack returns to the Render API callback, which verifies the transaction and redirects the customer to `https://femmadexdrive.netlify.app/payment-result`. The callback URL is derived from Render's `RENDER_EXTERNAL_URL`; it must not point to a Netlify Functions URL.
 
 The webhook verifies `x-paystack-signature` with HMAC SHA-512 before changing an order to paid.
 
@@ -132,7 +131,6 @@ Server-only variables:
 - `SUPABASE_SECRET_KEY` (or legacy `SUPABASE_SERVICE_ROLE_KEY`)
 - `APP_ORIGIN`
 - `PAYSTACK_SECRET_KEY`
-- `PAYSTACK_CALLBACK_URL`
 - `ORS_API_KEY`
 - `RESEND_API_KEY`
 - `RESEND_FROM_EMAIL`
@@ -163,7 +161,7 @@ Use `femmadexdrive.netlify.app`. Set base directory `frontend`, build command `n
 
 ### Render API
 
-Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `ORS_API_KEY` for OpenRouteService road routing. Set `APP_ORIGIN=https://femmadexdrive.netlify.app` and `PAYSTACK_CALLBACK_URL=https://femmadexdrive.onrender.com/api/paystack-callback`. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–011 before enabling production traffic.
+Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `ORS_API_KEY` for OpenRouteService road routing. Set `APP_ORIGIN=https://femmadexdrive.netlify.app`. The Paystack return callback is generated using Render's `RENDER_EXTERNAL_URL`; do not configure a Netlify callback URL. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–011 before enabling production traffic.
 
 
 The API exposes `/health` and endpoints under `/api/`. Automatic delivery completion runs at startup and once per minute in the Render process. Locally, run `npm run dev` from `frontend/` and `npm start` from `backend/`; without `VITE_API_BASE_URL`, Vite proxies `/api` to the local backend at `127.0.0.1:10000` (override with `API_PROXY_TARGET` if needed). Frontend-only browser variables belong in `frontend/.env`, while server-only variables belong in `backend/.env`.
@@ -174,7 +172,7 @@ Netlify production builds do not read local `.env` files. Configure `VITE_SUPABA
 
 New delivery requests are calculated through the authenticated `/api/quote` endpoint using the OpenRouteService `driving-car/geojson` route. The backend prices the route at ₦1,500 base fare, first 5 km included, ₦150/km after that, and a ₦2,000 minimum, plus ₦500 for medium and ₦1,000 for large/very-large packages. Quotes await admin/supervisor review; only the approved amount is available to customer checkout. Apply migration 011 before using the updated quote flow.
 
-Run `npm run check:live` from `frontend/` before deployment. It checks Supabase Auth, database tables, Paystack key acceptance, routing/email credentials, Netlify and Render reachability, CORS, and callback URL consistency. These read-only probes do not initialize a payment or send email.
+Run `npm run check:live` from `frontend/` before deployment. It checks Supabase Auth, database tables, Paystack key acceptance, routing/email credentials, Netlify and Render reachability, CORS, and that the callback route is registered on the Render API. These read-only probes do not initialize a payment or send email.
 
 Build:
 

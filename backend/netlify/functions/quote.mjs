@@ -1,4 +1,4 @@
-import {sb,json,body,err,userFromRequest} from "./_lib.mjs";
+import {sb,json,body,err,userFromRequest,HttpError} from "./_lib.mjs";
 import {reverseGeocode} from "./_geocoding.mjs";
 
 const ORS_DIRECTIONS_URL="https://api.openrouteservice.org/v2/directions/driving-car/geojson";
@@ -11,10 +11,10 @@ const PACKAGE_LARGE_SURCHARGE=1000;
 
 const optionalAmount=(value,name)=>{
  if(value===null||value===undefined||value==="")return 0;
- if(typeof value!=="number"&&typeof value!=="string")throw new Error(`${name} must be a valid non-negative number.`);
- if(typeof value==="string"&&!value.trim())throw new Error(`${name} must be a valid non-negative number.`);
+ if(typeof value!=="number"&&typeof value!=="string")throw new HttpError(`${name} must be a valid non-negative number.`,400);
+ if(typeof value==="string"&&!value.trim())throw new HttpError(`${name} must be a valid non-negative number.`,400);
  const amount=Number(value);
- if(!Number.isFinite(amount)||amount<0)throw new Error(`${name} must be a valid non-negative number.`);
+ if(!Number.isFinite(amount)||amount<0)throw new HttpError(`${name} must be a valid non-negative number.`,400);
  return amount;
 };
 
@@ -42,31 +42,35 @@ export default async req=>{
  try{
   const user=await userFromRequest(req);
   const request=await body(req);
+  if(!request||typeof request!=="object"||Array.isArray(request))throw new HttpError("Invalid delivery quote request.",400);
   const db=sb();
   const {data:profile,error:profileError}=await db.from("profiles").select("role").eq("id",user.id).maybeSingle();
-  if(profileError)throw profileError;
-  if(profile?.role!=="customer")throw new Error("A customer account is required to request a delivery quote.");
+  if(profileError){
+   console.error("Could not verify customer role for delivery quote",{code:profileError.code,message:profileError.message});
+   throw new HttpError("Your account could not be verified. Please try again.",503);
+  }
+  if(profile?.role!=="customer")throw new HttpError("A customer account is required to request a delivery quote.",403);
   const pickupLatitude=coordinate(request.pickupCoordinates,"lat",-90,90);
   const pickupLongitude=coordinate(request.pickupCoordinates,"lng",-180,180);
   const dropoffLatitude=coordinate(request.dropoffCoordinates,"lat",-90,90);
   const dropoffLongitude=coordinate(request.dropoffCoordinates,"lng",-180,180);
   if([pickupLatitude,pickupLongitude,dropoffLatitude,dropoffLongitude].some(value=>value===null)){
-   return json({error:"Please select your pickup and delivery locations again."},400);
+   throw new HttpError("Please select valid pickup and delivery locations again.",400);
   }
 
   const description=String(request.description||"").trim().slice(0,2000);
   const recipientName=String(request.recipientName||"").trim().slice(0,120);
-  if(!description)throw new Error("Package description is required.");
-  if(!recipientName)throw new Error("Recipient name is required.");
+  if(!description)throw new HttpError("Package description is required.",400);
+  if(!recipientName)throw new HttpError("Recipient name is required.",400);
 
   const weight=optionalAmount(request.weightKg,"Package weight");
   const length=optionalAmount(request.lengthCm,"Package length");
   const width=optionalAmount(request.widthCm,"Package width");
   const height=optionalAmount(request.heightCm,"Package height");
   if(weight>1000||length>10000||width>10000||height>10000){
-   throw new Error("Package weight or dimensions are outside the supported range.");
+   throw new HttpError("Package weight or dimensions are outside the supported range.",400);
   }
-  if(!["small","medium","large","very_large"].includes(request.size))throw new Error("Select a valid package size.");
+  if(!["small","medium","large","very_large"].includes(request.size))throw new HttpError("Select a valid package size.",400);
   const packageSize=weight>0?packageSizeForWeight(weight):request.size;
   const volume=length*width*height;
   const vehicleType=vehicleFor(weight,packageSize,volume);
@@ -79,10 +83,16 @@ export default async req=>{
    ]);
   }catch(geocodingError){
    console.error("Could not verify delivery locations",geocodingError.message);
-   return json({error:"Please select your pickup and delivery locations again."},400);
+   throw new HttpError("Please verify both pickup and delivery addresses and try again.",422);
+  }
+  if(!pickup?.address?.trim()||!dropoff?.address?.trim()){
+   throw new HttpError("Please verify both pickup and delivery addresses and try again.",422);
   }
 
-  if(!process.env.ORS_API_KEY)throw new Error("ORS_API_KEY is not configured.");
+  if(!process.env.ORS_API_KEY){
+   console.error("OpenRouteService is not configured: ORS_API_KEY is missing.");
+   throw new HttpError("Route calculation is temporarily unavailable. Please try again later.",503);
+  }
   let routeResponse;
   try{
    routeResponse=await fetch(ORS_DIRECTIONS_URL,{
@@ -95,12 +105,12 @@ export default async req=>{
    });
   }catch(routeError){
    console.error("OpenRouteService request failed",routeError.message);
-   return json({error:"Unable to calculate the delivery route. Please try again."},502);
+   throw new HttpError("Unable to calculate the delivery route. Please try again.",502);
   }
 
   if(!routeResponse.ok){
    console.error("OpenRouteService rejected the route request",{status:routeResponse.status});
-   return json({error:"Unable to calculate the delivery route. Please try again."},502);
+   throw new HttpError("Unable to calculate the delivery route. Please try again.",502);
   }
 
   let routeData;
@@ -108,14 +118,14 @@ export default async req=>{
    routeData=await routeResponse.json();
   }catch(parseError){
    console.error("OpenRouteService returned invalid route JSON",parseError.message);
-   return json({error:"Unable to calculate the delivery route. Please try again."},502);
+   throw new HttpError("Unable to calculate the delivery route. Please try again.",502);
   }
   const summary=routeData.features?.[0]?.properties?.summary;
-  const distanceMeters=Number(summary?.distance);
-  const durationSeconds=Number(summary?.duration);
-  if(!Number.isFinite(distanceMeters)||distanceMeters<0||!Number.isFinite(durationSeconds)||durationSeconds<0){
+  const distanceMeters=summary?.distance;
+  const durationSeconds=summary?.duration;
+  if(typeof distanceMeters!=="number"||!Number.isFinite(distanceMeters)||distanceMeters<0||typeof durationSeconds!=="number"||!Number.isFinite(durationSeconds)||durationSeconds<0){
    console.error("OpenRouteService response did not contain a valid route summary");
-   return json({error:"Unable to calculate the delivery route. Please try again."},502);
+   throw new HttpError("Unable to calculate the delivery route. Please try again.",502);
   }
 
   const distanceKm=distanceMeters/1000;
@@ -143,7 +153,17 @@ export default async req=>{
    p_suggested_price:suggestedPrice,
    p_requires_manual_review:requiresManualReview
   });
-  if(error)throw error;
+  if(error){
+   console.error("Delivery quote persistence failed",{code:error.code,message:error.message});
+   if(error.code==="PGRST202"||error.code==="42883"){
+    throw new HttpError("Delivery quote service is not ready. Please contact FemmaDexDrive support before retrying.",503);
+   }
+   throw new HttpError("Could not save the delivery quote. Please try again later.",500);
+  }
+  if(!order?.id){
+   console.error("Delivery quote RPC returned no persisted order ID");
+   throw new HttpError("Could not confirm that the delivery quote was saved. Please contact support before retrying.",502);
+  }
   return json({
    order,
    pickup,
@@ -155,7 +175,7 @@ export default async req=>{
    currency:"NGN"
   });
  }catch(error){
-  console.error("Delivery quote could not be created",error.message);
+  if(!(error instanceof HttpError))console.error("Delivery quote could not be created",error.message);
   return err(error);
  }
 };

@@ -494,3 +494,5 @@ revoke all on function public.apply_paystack_payment(text,text,bigint,text,bigin
   from public, anon, authenticated;
 grant execute on function public.apply_paystack_payment(text,text,bigint,text,bigint,text,jsonb)
   to service_role;
+
+notify pgrst, 'reload schema';

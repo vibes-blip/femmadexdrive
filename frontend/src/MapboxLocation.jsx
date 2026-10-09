@@ -207,6 +207,7 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
  const [selectedAddress,setSelectedAddress]=useState("");
  const [error,setError]=useState("");
  const [mapError,setMapError]=useState("");
+ const [tileWarning,setTileWarning]=useState("");
  const loadingRef=useRef(loading);
  loadingRef.current=loading;
 
@@ -222,6 +223,7 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
  useEffect(()=>{
   if(!container.current)return;
   let instance;
+  let initializationTimer;
   try{
    instance=new maplibregl.Map({
     container:container.current,
@@ -232,7 +234,16 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
    });
    map.current=instance;
    instance.addControl(new maplibregl.NavigationControl({showCompass:true}),"top-right");
+   initializationTimer=setTimeout(()=>{
+    if(!instance.isStyleLoaded())setMapError("The map is taking longer than expected to initialize. You can still search for a location or retry.");
+   },10000);
+   instance.on("style.load",()=>{
+    clearTimeout(initializationTimer);
+    setMapError("");
+   });
    instance.on("load",()=>{
+    clearTimeout(initializationTimer);
+    setMapError("");
     if(initialCoordinates&&validPoint(initialCoordinates.lat,initialCoordinates.lng)){
      marker.current=new maplibregl.Marker({color:"#6d28d9",draggable:true})
       .setLngLat([initialCoordinates.lng,initialCoordinates.lat])
@@ -257,15 +268,15 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
    instance.on("error",event=>{
     if(event.error){
      const sourceIsTiles=event.sourceId==="openstreetmap"||event.tile||/tile\.openstreetmap\.org|tile/i.test(event.error.message||"");
-     setMapError(sourceIsTiles
-      ?"Map tiles could not be loaded. Check your connection and retry."
-      :"The map could not finish loading. You can still search for a location or retry.");
+     if(sourceIsTiles)setTileWarning("Some map tiles could not be loaded. Check your connection; you can still select a location.");
     }
    });
   }catch(mapError){
+   clearTimeout(initializationTimer);
    setMapError(mapError.message||"The map could not be opened.");
   }
   return()=>{
+   clearTimeout(initializationTimer);
    map.current=null;
    marker.current=null;
    instance?.remove();
@@ -352,6 +363,7 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
    {selectedPoint&&<small className="address-hint">Selected coordinates: {selectedPoint.lat.toFixed(6)}, {selectedPoint.lng.toFixed(6)}</small>}
    {selectedAddress&&<p className="map-selected-address"><MapPin size={15}/>{selectedAddress}</p>}
    {mapError&&<div className="address-error" role="alert">{mapError}</div>}
+   {tileWarning&&<div className="address-hint" role="status">{tileWarning}</div>}
    {error&&<div className="address-error" role="alert">{error}</div>}
    {!selectedPoint&&<small className="address-hint">No location is selected yet. Choose a search result or click the map.</small>}
    <div className="map-actions"><button className="secondary" onClick={onClose} disabled={loading}>Cancel</button><button className="primary" disabled={loading||!selectedPoint} onClick={confirm}>{loading?"Verifying address…":"Use this location"}</button></div>

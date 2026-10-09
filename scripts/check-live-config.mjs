@@ -37,7 +37,6 @@ const apiBase = (process.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 const serverUrl = process.env.SUPABASE_URL;
 const serverKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 const appOrigin = process.env.APP_ORIGIN;
-const callbackUrl = process.env.PAYSTACK_CALLBACK_URL;
 
 await check("frontend Supabase URL and public anon key configured", async () => {
   if (!supabaseUrl || !anonKey) throw new Error("set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY");
@@ -78,10 +77,12 @@ if (serverUrl && serverKey) {
   }
 }
 
-await check("APP_ORIGIN and Paystack callback URL match", async () => {
-  if (!appOrigin || !callbackUrl || !apiBase) throw new Error("set APP_ORIGIN, PAYSTACK_CALLBACK_URL, and VITE_API_BASE_URL");
+await check("APP_ORIGIN and Paystack callback route configured", async () => {
+  if (!appOrigin || !apiBase) throw new Error("set APP_ORIGIN and VITE_API_BASE_URL");
   if (new URL(appOrigin).origin !== "https://femmadexdrive.netlify.app") throw new Error("APP_ORIGIN must match the requested Netlify site");
-  if (new URL(callbackUrl).origin !== new URL(apiBase).origin) throw new Error("callback hostname must match the Render API host");
+  if (new URL(apiBase).pathname.replace(/\/+$/, "") !== "/api") throw new Error("VITE_API_BASE_URL must point to the Render /api path");
+  const server = await readFile(resolve(root, "backend/server.mjs"), "utf8");
+  if (!server.includes('["paystack-callback"')) throw new Error("Render does not register the Paystack callback route");
 });
 
 if (appOrigin) {

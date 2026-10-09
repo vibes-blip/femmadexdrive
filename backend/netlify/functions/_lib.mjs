@@ -16,6 +16,25 @@ export const corsHeaders=(methods="GET, POST, OPTIONS")=>{
  };
 };
 export const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"Content-Type":"application/json",...corsHeaders()}});
-export const body=async req=>{try{return await req.json()}catch{return{}}};
-export async function userFromRequest(req){const h=req.headers.get("authorization")||"";const token=h.replace(/^Bearer\s+/i,"");if(!token)throw new Error("Authentication required");const admin=sb();const {data,error}=await admin.auth.getUser(token);if(error||!data.user)throw new Error("Invalid session");return data.user}
-export const err=e=>json({error:e?.message||"Server error"},400);
+export class HttpError extends Error{
+ constructor(message,status){super(message);this.name="HttpError";this.status=status}
+}
+export const body=async req=>{
+ try{return await req.json()}
+ catch{throw new HttpError("Request body must contain valid JSON.",400)}
+};
+export async function userFromRequest(req){
+ const authorization=req.headers.get("authorization")||"";
+ const token=authorization.match(/^Bearer\s+(\S+)$/i)?.[1];
+ if(!token)throw new HttpError("Authentication required. Sign in and try again.",401);
+ let result;
+ try{result=await sb().auth.getUser(token)}
+ catch{throw new HttpError("Authentication service is temporarily unavailable.",503)}
+ if(result.error||!result.data.user){
+  const invalidToken=result.error?.status===401||/invalid|expired|jwt|token/i.test(`${result.error?.code||""} ${result.error?.message||""}`);
+  if(invalidToken)throw new HttpError("Your session is invalid or expired. Sign in again.",401);
+  throw new HttpError("Authentication service is temporarily unavailable.",503);
+ }
+ return result.data.user;
+}
+export const err=e=>json({error:e?.message||"Server error"},Number.isInteger(e?.status)?e.status:500);

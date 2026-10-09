@@ -1,4 +1,4 @@
-import {fetchGeocoding} from "./_geocoding.mjs";
+import {fetchGeocoding,reverseGeocode} from "./_geocoding.mjs";
 import {corsHeaders} from "./_lib.mjs";
 
 const headers={"Content-Type":"application/json",...corsHeaders("GET, OPTIONS")};
@@ -11,12 +11,6 @@ const formatAddress=properties=>{
  const address=[title,...context].filter(Boolean).join(", ");
  return {title:title||"Selected location",address,details:context.join(", ")};
 };
-const formatReverseAddress=item=>{
- const parts=item.address||{},street=[parts.house_number,parts.road].filter(Boolean).join(" ");
- const title=item.name||parts.amenity||parts.shop||parts.tourism||parts.leisure||parts.building||street||parts.neighbourhood||parts.suburb||parts.village||parts.town||parts.city||parts.county;
- const context=[street,parts.neighbourhood,parts.suburb,parts.village,parts.town,parts.city,parts.state,parts.country].filter((part,index,all)=>part&&all.indexOf(part)===index&&part!==title);
- return {title:title||"Selected location",address:[title,...context].filter(Boolean).join(", "),details:context.join(", ")};
-};
 export default async req=>{
  if(req.method==="OPTIONS")return new Response("",{status:204,headers});
  const params=new URL(req.url).searchParams,query=(params.get("q")||"").trim().slice(0,180),rawLat=params.get("lat"),rawLng=params.get("lng"),lat=rawLat===null?NaN:Number(rawLat),lng=rawLng===null?NaN:Number(rawLng),near=rawLat!==null&&rawLng!==null&&rawLat.trim()!==""&&rawLng.trim()!==""&&validPoint(lat,lng);
@@ -24,10 +18,8 @@ export default async req=>{
  if(!query&&!near)return reply({results:[]});
  try{
   if(!query){
-   const response=await fetchGeocoding(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&lat=${lat}&lon=${lng}`);
-   if(!response.ok)return reply({error:"Nearby address search is temporarily unavailable."},502);
-   const item=await response.json(),formatted=formatReverseAddress(item);
-   return reply({results:formatted.address?[{...formatted,lat,lng}]:[]});
+   const result=await reverseGeocode(lat,lng);
+   return reply({results:[result]});
   }
   const search=new URL("https://photon.komoot.io/api/");
   search.searchParams.set("limit","8");search.searchParams.set("q",query);

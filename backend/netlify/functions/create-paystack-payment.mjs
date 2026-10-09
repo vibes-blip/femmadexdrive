@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import {sb,userFromRequest,body,json,err} from "./_lib.mjs";
+import {sb,userFromRequest,body,json,err,HttpError} from "./_lib.mjs";
 
 const paystack=async(path,opts={})=>{
   if(!process.env.PAYSTACK_SECRET_KEY) throw new Error("PAYSTACK_SECRET_KEY is not configured.");
@@ -65,19 +65,38 @@ export default async req=>{
     const approvedPrice=isReviewedQuote?Number(quote.approved_price):Number(o.final_price);
     if(!Number.isFinite(approvedPrice)||approvedPrice<=0) throw new Error("Invalid delivery price");
 
-    const {data:pending,error:pendingError}=await db.from("payments").select("id").eq("order_id",o.id).eq("status","pending").maybeSingle();
+    const {data:pending,error:pendingError}=await db.from("payments").select("id,reference").eq("order_id",o.id).eq("status","pending").maybeSingle();
     if(pendingError) throw pendingError;
-    if(pending) throw new Error("A payment is already in progress for this delivery. Wait for its status before trying again.");
+    if(pending){
+      let existingTransaction;
+      try{
+        existingTransaction=await verifyReference(pending.reference);
+      }catch(error){
+        console.error("Could not verify the existing pending Paystack payment",error.message);
+        throw new HttpError("We couldn't verify your previous payment yet. Please wait and refresh your deliveries before trying again.",503);
+      }
+      const existingStatus=String(existingTransaction.status||"").toLowerCase();
+      if(existingStatus==="success"){
+        const applied=await markPayment(existingTransaction);
+        if(applied)return json({alreadyPaid:true,reference:pending.reference});
+        throw new HttpError("Paystack reports this payment succeeded, but FemmaDexDrive could not confirm it. Please contact support; do not pay again.",409);
+      }
+      if(["failed","abandoned","reversed"].includes(existingStatus)){
+        await markPayment(existingTransaction);
+      }else{
+        throw new HttpError("Your previous payment is still being processed. Wait a moment and refresh your deliveries before retrying.",409);
+      }
+    }
 
     const reference=`FDD-${o.tracking_number}-${crypto.randomUUID().slice(0,8)}`;
     const {data:p,error:pe}=await db.from("payments").insert({order_id:o.id,customer_id:user.id,amount:approvedPrice,currency:"NGN",status:"pending",reference}).select("*").single();
     if(pe){
-      if(pe.code==="23505") throw new Error("A payment is already in progress for this delivery. Wait for its status before trying again.");
+      if(pe.code==="23505") throw new HttpError("A payment is already in progress for this delivery. Wait for its status before trying again.",409);
       throw pe;
     }
     if(!p) throw new Error("Could not create payment record");
 
-    const origin=new URL(req.url).origin;
+    const origin=process.env.RENDER_EXTERNAL_URL||new URL(req.url).origin;
     let d;
     try{
       d=await paystack("/transaction/initialize",{
@@ -87,7 +106,7 @@ export default async req=>{
           email:user.email,
           currency:"NGN",
           reference,
-          callback_url:process.env.PAYSTACK_CALLBACK_URL||`${origin}/api/paystack-callback`,
+          callback_url:new URL("/api/paystack-callback",origin).href,
           metadata:{order_id:o.id,tracking_number:o.tracking_number},
           channels:["card","bank","ussd","bank_transfer","mobile_money"]
         })
