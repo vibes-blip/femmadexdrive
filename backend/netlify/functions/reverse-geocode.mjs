@@ -1,6 +1,7 @@
 import {reverseGeocode} from "./_geocoding.mjs";
+import {corsHeaders} from "./_lib.mjs";
 
-const headers={"Content-Type":"application/json","Access-Control-Allow-Origin":process.env.APP_ORIGIN||"*","Access-Control-Allow-Methods":"GET, OPTIONS","Access-Control-Allow-Headers":"Content-Type, Authorization"};
+const headers={"Content-Type":"application/json",...corsHeaders("GET, OPTIONS")};
 const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers});
 export default async req=>{
  if(req.method==="OPTIONS")return new Response("",{status:204,headers});

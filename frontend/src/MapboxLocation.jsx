@@ -1,8 +1,8 @@
 import React,{useEffect,useId,useRef,useState} from "react";
 import * as maplibregl from "maplibre-gl";
 import {Clock3,LocateFixed,MapPin,Navigation,Search,X} from "lucide-react";
+import {apiUrl} from "./api.js";
 
-const NIGERIA_PROXIMITY="3.3792,6.5244";
 const OSM_STYLE={
  version:8,
  sources:{
@@ -20,77 +20,43 @@ const OSM_STYLE={
  layers:[{id:"openstreetmap-raster",type:"raster",source:"openstreetmap"}]
 };
 const validPoint=(lat,lng)=>lat!==null&&lat!==undefined&&lat!==""&&lng!==null&&lng!==undefined&&lng!==""&&Number.isFinite(Number(lat))&&Number(lat)>=-90&&Number(lat)<=90&&Number.isFinite(Number(lng))&&Number(lng)>=-180&&Number(lng)<=180;
-const nominatimCache=new Map();
-let nominatimQueue=Promise.resolve();
-let lastNominatimRequestAt=0;
-
-async function nominatimRequest(url,signal){
- const key=url.toString();
- if(nominatimCache.has(key))return nominatimCache.get(key);
- const request=nominatimQueue.then(async()=>{
-  if(signal?.aborted)throw new DOMException("The operation was aborted.","AbortError");
-  const delay=Math.max(0,1100-(Date.now()-lastNominatimRequestAt));
-  if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
-  if(signal?.aborted)throw new DOMException("The operation was aborted.","AbortError");
-  lastNominatimRequestAt=Date.now();
-  const response=await fetch(url,{signal,headers:{"Accept-Language":"en"}});
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok){
-   if(response.status===429)throw new Error("Address search is busy. Please wait a moment and try again.");
-   throw new Error(data.error||"OpenStreetMap address lookup is temporarily unavailable.");
-  }
-  if(nominatimCache.size>=250)nominatimCache.delete(nominatimCache.keys().next().value);
-  nominatimCache.set(key,data);
-  return data;
- });
- nominatimQueue=request.then(()=>undefined,()=>undefined);
- return request;
+export function locationUnavailableMessage(){
+ if(typeof window!=="undefined"&&!window.isSecureContext)return "Browser location requires a secure HTTPS connection. Enter an address or choose a location on the map instead.";
+ if(typeof navigator==="undefined"||!navigator.geolocation)return "Location is not available in this browser. Enter an address or choose a location on the map instead.";
+ return "";
 }
 
-function nameFromAddress(item){
- const parts=item.address||{};
- const street=[parts.house_number,parts.road].filter(Boolean).join(" ");
- return item.name||parts.amenity||parts.shop||parts.tourism||parts.leisure||parts.building||street||parts.neighbourhood||parts.suburb||parts.village||parts.town||parts.city||parts.county||item.display_name;
+export function geolocationErrorMessage(error,fallback){
+ if(error?.code===1)return `Location permission was denied. ${fallback}`;
+ if(error?.code===2)return `Your location could not be determined. Check your device's location settings or ${fallback.toLowerCase()}`;
+ if(error?.code===3)return `Finding your location timed out. Try again or ${fallback.toLowerCase()}`;
+ return `Could not get your location. ${fallback}`;
+}
+
+async function geocodingRequest(path,params,signal){
+ const endpoint=new URL(apiUrl(path),window.location.href);
+ for(const [name,value] of Object.entries(params))endpoint.searchParams.set(name,String(value));
+ const response=await fetch(endpoint,{signal,headers:{"Accept-Language":"en"}});
+ const data=await response.json().catch(()=>({}));
+ if(!response.ok)throw new Error(data.error||"Address lookup is temporarily unavailable.");
+ return data;
 }
 
 export async function searchAddresses(query,{proximity,signal}={}){
- const endpoint=new URL("https://nominatim.openstreetmap.org/search");
- endpoint.searchParams.set("q",query);
- endpoint.searchParams.set("format","jsonv2");
- endpoint.searchParams.set("addressdetails","1");
- endpoint.searchParams.set("limit","8");
- endpoint.searchParams.set("accept-language","en");
- const center=proximity||{lng:Number(NIGERIA_PROXIMITY.split(",")[0]),lat:Number(NIGERIA_PROXIMITY.split(",")[1])};
- const radius=0.75;
- endpoint.searchParams.set("viewbox",`${center.lng-radius},${center.lat+radius},${center.lng+radius},${center.lat-radius}`);
- const data=await nominatimRequest(endpoint,signal);
- return (Array.isArray(data)?data:[]).flatMap(item=>{
-  const lat=Number(item.lat),lng=Number(item.lon),address=item.display_name?.trim();
-  if(!validPoint(lat,lng)||!address)return [];
-  const title=nameFromAddress(item)||address;
-  return [{
-   address,
-   title,
-   details:address,
-   lat,
-   lng
-  }];
+ const center=proximity||{lng:3.3792,lat:6.5244};
+ const data=await geocodingRequest("address-search",{q:query,lat:center.lat,lng:center.lng},signal);
+ return (Array.isArray(data.results)?data.results:[]).flatMap(item=>{
+  const lat=Number(item.lat),lng=Number(item.lng),address=item.address?.trim();
+  return validPoint(lat,lng)&&address?[{...item,address,title:item.title||address,details:item.details||address,lat,lng}]:[];
  });
 }
 
 export async function reverseGeocode(lat,lng,signal){
  if(!validPoint(lat,lng))throw new Error("Select a valid location on the map.");
- const endpoint=new URL("https://nominatim.openstreetmap.org/reverse");
- endpoint.searchParams.set("format","jsonv2");
- endpoint.searchParams.set("lat",String(Number(lat)));
- endpoint.searchParams.set("lon",String(Number(lng)));
- endpoint.searchParams.set("zoom","18");
- endpoint.searchParams.set("addressdetails","1");
- endpoint.searchParams.set("accept-language","en");
- const item=await nominatimRequest(endpoint,signal);
- const address=item.display_name?.trim();
+ const result=await geocodingRequest("reverse-geocode",{lat:Number(lat),lng:Number(lng)},signal);
+ const address=result.address?.trim();
  if(!address)throw new Error("No readable address could be verified at this point. Move the pin to a nearby street or landmark.");
- return {address,title:nameFromAddress(item)||address,lat:Number(lat),lng:Number(lng)};
+ return {...result,address,title:result.title||address,lat:Number(lat),lng:Number(lng)};
 }
 
 function useRecentLocations(){
@@ -173,16 +139,17 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
  };
 
  const searchNearby=()=>{
-  if(!navigator.geolocation){setError("Location is not available in this browser.");return}
+  const unavailable=locationUnavailableMessage();
+  if(unavailable){setError(unavailable);return}
   setNearbyBusy(true);
   setError("");
   navigator.geolocation.getCurrentPosition(position=>{
    setNear({lat:position.coords.latitude,lng:position.coords.longitude});
    setNearbyBusy(false);
    setFocused(true);
-  },()=>{
+  },error=>{
    setNearbyBusy(false);
-   setError("Location permission was not granted. You can still type an address or choose it on the map.");
+   setError(geolocationErrorMessage(error,"You can still type an address or choose it on the map."));
   },{enableHighAccuracy:true,timeout:12000});
  };
 
@@ -308,14 +275,15 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
  };
 
  const useCurrentLocation=()=>{
-  if(!navigator.geolocation){setError("Location is not available in this browser.");return}
+  const unavailable=locationUnavailableMessage();
+  if(unavailable){setError(unavailable);return}
   setLoading(true);
   navigator.geolocation.getCurrentPosition(position=>{
    placeMarker({lat:position.coords.latitude,lng:position.coords.longitude});
    setLoading(false);
-  },()=>{
+  },error=>{
    setLoading(false);
-   setError("Location permission was not granted. Search or select a point on the map instead.");
+   setError(geolocationErrorMessage(error,"Search or select a point on the map instead."));
   },{enableHighAccuracy:true,timeout:12000});
  };
 

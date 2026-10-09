@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Phone, PhoneOff, Radio } from "lucide-react";
 import { Room, RoomEvent } from "livekit-client";
+import { API_BASE } from "./api.js";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "https://femmadexdrive.onrender.com/api").replace(/\/+$/, "");
 const terminalStates = new Set(["ended", "declined", "missed", "failed"]);
 
 export default function LiveCall({ orderId, session, supabase, peerName = "delivery partner" }) {
