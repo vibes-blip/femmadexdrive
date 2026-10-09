@@ -92,7 +92,7 @@ See `SECURITY.md`. The application uses server-side secrets, Supabase RLS, priva
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `011_delivery_quote_review.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
+2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `013_one_active_delivery_per_rider.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
 
 3. Create/confirm your Auth settings.
 4. Create your first admin account through Supabase Auth.

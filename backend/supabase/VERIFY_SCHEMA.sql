@@ -1,5 +1,5 @@
 -- Read-only check of the core FEMADEXDRIVE schema.
--- Run after applying migrations 001 through 010 in order.
+-- Run after applying migrations 001 through 013 in order.
 with expected_objects (kind, object_name) as (
   values
     ('type', 'user_role'),
