@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" role="img" aria-labelledby="title desc">
+ <title id="title">Medium parcel illustration</title>
+ <desc id="desc">A sturdy medium cardboard box ready for delivery</desc>
+ <rect width="480" height="300" rx="26" fill="#10231a"/>
+ <circle cx="390" cy="70" r="44" fill="#173f31"/>
+ <path d="M111 108l130-61 132 61-132 63z" fill="#e7b96f"/>
+ <path d="M111 108v117l130 63V171z" fill="#c48a43"/>
+ <path d="M373 108v117l-132 63V171z" fill="#e1a85b"/>
+ <path d="M204 65l132 61-43 25-131-62z" fill="#f4d496"/>
+ <path d="M241 171v113" stroke="#ffe7b3" stroke-width="9" opacity=".85"/>
+ <circle cx="90" cy="248" r="4" fill="#36d59d"/><circle cx="117" cy="261" r="3" fill="#8debc8"/>
+</svg>

@@ -1,23 +1,8 @@
 import {sb,json,body,err,userFromRequest,HttpError} from "./_lib.mjs";
 import {reverseGeocode} from "./_geocoding.mjs";
+import {calculateSuggestedPrice,resolvePackageSelection} from "./_package-selection.mjs";
 
 const ORS_DIRECTIONS_URL="https://api.openrouteservice.org/v2/directions/driving-car/geojson";
-const BASE_FARE=1500;
-const INCLUDED_KM=5;
-const PRICE_PER_EXTRA_KM=150;
-const MINIMUM_FARE=2000;
-const PACKAGE_MEDIUM_SURCHARGE=500;
-const PACKAGE_LARGE_SURCHARGE=1000;
-
-const optionalAmount=(value,name)=>{
- if(value===null||value===undefined||value==="")return 0;
- if(typeof value!=="number"&&typeof value!=="string")throw new HttpError(`${name} must be a valid non-negative number.`,400);
- if(typeof value==="string"&&!value.trim())throw new HttpError(`${name} must be a valid non-negative number.`,400);
- const amount=Number(value);
- if(!Number.isFinite(amount)||amount<0)throw new HttpError(`${name} must be a valid non-negative number.`,400);
- return amount;
-};
-
 const coordinate=(point,key,min,max)=>{
  const value=point?.[key];
  if(value===null||value===undefined||value==="")return null;
@@ -27,15 +12,7 @@ const coordinate=(point,key,min,max)=>{
  return Number.isFinite(number)&&number>=min&&number<=max?number:null;
 };
 
-const packageSizeForWeight=weight=>weight<=2?"small":weight<=5?"medium":weight<=10?"large":"very_large";
-const vehicleFor=(weight,size,volume)=>weight>250||size==="very_large"||volume>1_000_000?"lorry":weight>50||size==="large"||volume>250_000?"van":weight>12||size==="medium"||volume>60_000?"car":"motorcycle";
-
-export function calculateSuggestedPrice(distanceMeters,packageSize){
- const distanceKm=distanceMeters/1000;
- const distanceCharge=Math.max(0,distanceKm-INCLUDED_KM)*PRICE_PER_EXTRA_KM;
- const packageAdjustment=packageSize==="small"?0:packageSize==="medium"?PACKAGE_MEDIUM_SURCHARGE:PACKAGE_LARGE_SURCHARGE;
- return Math.max(MINIMUM_FARE,Math.round(BASE_FARE+distanceCharge))+packageAdjustment;
-}
+export {calculateSuggestedPrice};
 
 export default async req=>{
  if(req.method==="OPTIONS")return new Response("",{status:204});
@@ -63,17 +40,13 @@ export default async req=>{
   if(!description)throw new HttpError("Package description is required.",400);
   if(!recipientName)throw new HttpError("Recipient name is required.",400);
 
-  const weight=optionalAmount(request.weightKg,"Package weight");
-  const length=optionalAmount(request.lengthCm,"Package length");
-  const width=optionalAmount(request.widthCm,"Package width");
-  const height=optionalAmount(request.heightCm,"Package height");
-  if(weight>1000||length>10000||width>10000||height>10000){
-   throw new HttpError("Package weight or dimensions are outside the supported range.",400);
+  let packageSelection;
+  try{
+   packageSelection=resolvePackageSelection(request);
+  }catch(selectionError){
+   throw new HttpError(selectionError.message,400);
   }
-  if(!["small","medium","large","very_large"].includes(request.size))throw new HttpError("Select a valid package size.",400);
-  const packageSize=weight>0?packageSizeForWeight(weight):request.size;
-  const volume=length*width*height;
-  const vehicleType=vehicleFor(weight,packageSize,volume);
+  const {packageCategory,packageSize,vehicleType,measurements,requiresManualReview}=packageSelection;
 
   let pickup,dropoff;
   try{
@@ -130,8 +103,7 @@ export default async req=>{
 
   const distanceKm=distanceMeters/1000;
   const suggestedPrice=calculateSuggestedPrice(distanceMeters,packageSize);
-  const requiresManualReview=weight>10||packageSize==="very_large";
-  const {data:order,error}=await db.rpc("create_delivery_quote",{
+  const {data:order,error}=await db.rpc("create_delivery_quote_with_category",{
    p_customer_id:user.id,
    p_pickup_address:pickup.address,
    p_pickup_latitude:pickupLatitude,
@@ -142,11 +114,12 @@ export default async req=>{
    p_recipient_name:recipientName,
    p_recipient_phone:String(request.recipientPhone||"").trim().slice(0,40)||null,
    p_goods_description:description,
-   p_weight_kg:weight||null,
-   p_length_cm:length||null,
-   p_width_cm:width||null,
-   p_height_cm:height||null,
+   p_weight_kg:measurements.weightKg,
+   p_length_cm:measurements.lengthCm,
+   p_width_cm:measurements.widthCm,
+   p_height_cm:measurements.heightCm,
    p_package_size:packageSize,
+   p_package_category:packageCategory,
    p_vehicle_type:vehicleType,
    p_distance_meters:distanceMeters,
    p_duration_seconds:durationSeconds,

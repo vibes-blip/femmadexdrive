@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 96" role="img" aria-labelledby="title">
+ <title id="title">FemmaDexDrive courier on a motorcycle</title>
+ <circle cx="31" cy="72" r="17" fill="none" stroke="#8debc8" stroke-width="6"/>
+ <circle cx="127" cy="72" r="17" fill="none" stroke="#8debc8" stroke-width="6"/>
+ <path d="M31 72l28-32 26 32 22-29 20 29M59 40h26M83 72H48" fill="none" stroke="#36d59d" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+ <path d="M62 17h30l-5 20H67z" fill="#36d59d"/>
+ <circle cx="84" cy="10" r="10" fill="#f5f8f6"/>
+ <path d="M83 24l-17 20 20 13 16-19M68 43l-5 21M84 56l-9 16" fill="none" stroke="#f5f8f6" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+ <rect x="96" y="26" width="23" height="19" rx="3" fill="#e7b96f"/>
+</svg>

@@ -1,10 +1,11 @@
 -- Read-only check of the core FEMADEXDRIVE schema.
--- Run after applying migrations 001 through 013 in order.
+-- Run after applying migrations 001 through 015 in order.
 with expected_objects (kind, object_name) as (
   values
     ('type', 'user_role'),
     ('type', 'rider_approval'),
     ('column', 'profiles.role'),
+    ('column', 'orders.package_category'),
     ('table', 'profiles'),
     ('table', 'riders'),
     ('table', 'orders'),
@@ -14,6 +15,11 @@ with expected_objects (kind, object_name) as (
     ('table', 'rider_reviews'),
     ('table', 'chat_rooms'),
     ('table', 'call_logs'),
+    ('table', 'rider_offers'),
+    ('table', 'order_assignment_history'),
+    ('table', 'dispatch_alerts'),
+    ('table', 'dispatch_settings'),
+    ('table', 'rider_admin_events'),
     ('function', 'touch_updated_at'),
     ('function', 'handle_new_user'),
     ('function', 'current_user_role'),
@@ -31,6 +37,29 @@ with expected_objects (kind, object_name) as (
     ('function', 'ensure_order_chat_room'),
     ('function', 'decline_order'),
     ('function', 'apply_paystack_payment'),
+    ('function', 'vehicle_compatible'),
+    ('function', 'dispatch_pending_orders'),
+    ('function', 'set_rider_approval_status'),
+    ('function', 'report_delivery_problem'),
+    ('function', 'admin_assign_order'),
+    ('function', 'return_order_to_rider_pool'),
+    ('function', 'admin_cancel_order'),
+    ('function', 'acknowledge_dispatch_alert'),
+    ('function', 'refresh_admin_dispatch_queue'),
+    ('function', 'save_rider_document_path'),
+    ('function', 'create_delivery_quote_with_category'),
+    ('function', 'set_delivery_quote_vehicle'),
+    ('realtime', 'rider_offers'),
+    ('realtime', 'dispatch_alerts'),
+    ('realtime', 'order_assignment_history'),
+    ('realtime', 'rider_admin_events'),
+    ('realtime', 'order_events'),
+    ('rls', 'rider_offers'),
+    ('rls', 'order_assignment_history'),
+    ('rls', 'dispatch_alerts'),
+    ('rls', 'dispatch_settings'),
+    ('rls', 'rider_admin_events'),
+    ('index', 'orders_one_active_delivery_per_rider_idx'),
     ('realtime', 'orders'),
     ('realtime', 'chat_messages'),
     ('realtime', 'riders'),
@@ -74,9 +103,15 @@ select
       where c.table_schema = 'public'
         and c.table_name = split_part(e.object_name, '.', 1)
         and c.column_name = split_part(e.object_name, '.', 2)
-        and c.udt_schema = 'public'
-        and c.udt_name = 'user_role'
-        and c.is_nullable = 'NO'
+        and (
+          (e.object_name = 'profiles.role'
+            and c.udt_schema = 'public'
+            and c.udt_name = 'user_role'
+            and c.is_nullable = 'NO')
+          or (e.object_name = 'orders.package_category'
+            and c.data_type = 'text'
+            and c.is_nullable = 'YES')
+        )
     )
     when 'table' then exists (
       select 1
@@ -136,6 +171,7 @@ select
         and c.confdeltype = 'c'
         and c.convalidated
     )
+    when 'index' then to_regclass('public.' || e.object_name) is not null
   end as installed
 from expected_objects e
 order by
@@ -148,6 +184,7 @@ order by
     when 'realtime' then 6
     when 'bucket' then 7
     when 'rls' then 8
+    when 'index' then 9
     else 9
   end,
   e.object_name;

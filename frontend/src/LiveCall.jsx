@@ -88,7 +88,7 @@ export default function LiveCall({ orderId, session, supabase, peerName = "deliv
       })
       .subscribe();
     supabase.from("call_logs")
-      .select("id,order_id,caller_id,receiver_id,status,started_at,answered_at,ended_at,duration_seconds")
+      .select("id,order_id,assignment_id,caller_id,receiver_id,status,started_at,answered_at,ended_at,duration_seconds")
       .eq("order_id", orderId)
       .in("status", ["ringing", "answered"])
       .order("created_at", { ascending: false })

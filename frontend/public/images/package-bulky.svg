@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" role="img" aria-labelledby="title desc">
+ <title id="title">Large or bulky goods illustration</title>
+ <desc id="desc">A large secured carton alongside a carrying trolley</desc>
+ <rect width="480" height="300" rx="26" fill="#10231a"/>
+ <circle cx="390" cy="66" r="48" fill="#173f31"/>
+ <path d="M83 109l143-62 143 62-143 70z" fill="#e7b96f"/>
+ <path d="M83 109v116l143 62V179z" fill="#c48a43"/>
+ <path d="M369 109v116l-143 62V179z" fill="#e1a85b"/>
+ <path d="M226 179v108M185 66l143 67" stroke="#ffe7b3" stroke-width="10"/>
+ <path d="M382 131h23v95l-31 43" fill="none" stroke="#36d59d" stroke-width="11" stroke-linecap="round"/>
+ <circle cx="373" cy="268" r="11" fill="#8debc8"/>
+ <circle cx="71" cy="249" r="4" fill="#36d59d"/><circle cx="105" cy="265" r="3" fill="#8debc8"/>
+</svg>

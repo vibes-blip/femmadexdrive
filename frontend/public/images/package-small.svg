@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" role="img" aria-labelledby="title desc">
+ <title id="title">Small parcel illustration</title>
+ <desc id="desc">A green envelope and small parcel on a dark background</desc>
+ <rect width="480" height="300" rx="26" fill="#10231a"/>
+ <circle cx="380" cy="66" r="38" fill="#173f31"/>
+ <rect x="88" y="83" width="195" height="142" rx="18" fill="#36d59d"/>
+ <path d="M96 98l89 72 90-72" fill="none" stroke="#07100d" stroke-width="11" stroke-linejoin="round"/>
+ <rect x="265" y="139" width="117" height="90" rx="12" fill="#d8f7eb"/>
+ <path d="M285 167h76M285 190h51" stroke="#258d68" stroke-width="8" stroke-linecap="round"/>
+ <circle cx="99" cy="248" r="5" fill="#36d59d"/><circle cx="122" cy="263" r="3" fill="#8debc8"/>
+</svg>

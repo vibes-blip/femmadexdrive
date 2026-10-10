@@ -63,6 +63,7 @@ export default async req=>{
      ${field("Recipient",order.recipient_name)}
      ${field("Recipient phone",order.recipient_phone)}
      ${field("Package",order.goods_description)}
+     ${field("Customer package category",order.package_category||order.package_size)}
      ${field("Package size",order.package_size)}
      ${field("Weight",order.weight_kg?`${order.weight_kg} kg`:"—")}
      ${field("Dimensions",dimensions)}
@@ -88,6 +89,18 @@ export default async req=>{
    const name=escapeHtml(profile.full_name||rider.display_name||"Rider");
    const portalUrl=`${(process.env.APP_ORIGIN||"https://femmadexdrive.netlify.app").replace(/\/+$/,"")}/rider`;
    await sendEmail(profile.email,"Your FemmaDexDrive rider application is approved",`<h2>Welcome to FemmaDexDrive, ${name}</h2><p>Your rider application has been approved. Sign in to the rider portal to go online and view eligible deliveries.</p><p><a href="${escapeHtml(portalUrl)}">Open rider portal</a></p><p>If you did not apply to become a rider, contact FemmaDexDrive support.</p>`);
+  }else if(request.type==="dispatch_admin_alert"){
+   const {data:adminProfile,error:adminError}=await db.from("profiles").select("role").eq("id",user.id).single();
+   if(adminError||!["admin","supervisor"].includes(adminProfile?.role))throw new Error("Operations access required");
+   const {data:alert,error:alertError}=await db.from("dispatch_alerts")
+    .select("id,alert_type,details,order:orders!dispatch_alerts_order_id_fkey(tracking_number)")
+    .eq("id",request.alertId).single();
+   if(alertError||!alert)throw new Error("Dispatch alert not found");
+   const tracking=alert.order?.tracking_number||"Delivery";
+   await sendAdmin(
+    `FEMADEXDRIVE dispatch attention: ${tracking}`,
+    `<h2>Dispatch action needed</h2><p><b>Tracking:</b> ${escapeHtml(tracking)}</p><p><b>Alert:</b> ${escapeHtml(alert.alert_type.replaceAll("_"," "))}</p><p>${escapeHtml(alert.details)}</p><p>Review this item in the operations dashboard.</p>`
+   );
   }else{
    throw new Error("Unsupported notification type");
   }

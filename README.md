@@ -92,7 +92,7 @@ See `SECURITY.md`. The application uses server-side secrets, Supabase RLS, priva
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `013_one_active_delivery_per_rider.sql` in order. Migration 006 is safe to apply when chat/call tables already exist.
+2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `015_package_categories_without_measurements.sql` in order. Migration 006 is safe to apply when chat/call tables already exist. Apply migrations 014 and 015 before deploying the matching frontend.
 
 3. Create/confirm your Auth settings.
 4. Create your first admin account through Supabase Auth.
@@ -102,6 +102,59 @@ See `SECURITY.md`. The application uses server-side secrets, Supabase RLS, priva
 Do not put the admin password in source code.
 
 The migration creates a private `rider-documents` storage bucket.
+
+## Rider matching, offers, and operations
+
+Migration 014 adds per-rider delivery offers, explicit eligibility checks, audited assignment history, operations alerts, and atomic assignment/reassignment RPCs. It preserves Paystack's `payment_status` and changes neither payment verification nor payment state during dispatch.
+
+The compatibility matrix is intentionally exact rather than rank-based:
+
+| Delivery requirement | Eligible rider vehicle |
+| --- | --- |
+| Motorcycle / bike | Motorcycle / bike |
+| Car | Car |
+| Van (legacy category) | Van |
+| Truck / lorry | Truck / lorry |
+
+In particular, a truck does not automatically receive motorcycle or car deliveries. Extend this matrix only after operations has approved the corresponding business rule.
+
+Offers expire after 90 seconds by default. Pending paid orders remain in `paid` (or the existing `searching` status) with `rider_id IS NULL`; declined and timed-out offers are stored per rider, while other eligible riders continue to receive offers. An online rider's dashboard refreshes every 15 seconds and also listens for Supabase Realtime changes. Going online and the operations dashboard refresh the queue immediately. No extra environment variables are required.
+
+The offer and unassigned-alert periods are configurable in Supabase SQL Editor by an operations DBA, for example:
+
+```sql
+update public.dispatch_settings
+set offer_timeout_seconds = 90,
+    unassigned_alert_minutes = 15,
+    updated_at = now()
+where id = true;
+```
+
+Migration 015 adds a nullable `orders.package_category` column; it does not overwrite old package or measurement data. New bookings store `small`, `medium`, or `bulky`; old rows without this value display a category inferred from the existing `package_size`. The four measurement columns remain in place and new bookings store `NULL` rather than fabricated values. Every new quote remains unpaid and awaits operations price approval. Operations must record the safe vehicle decision and reason before approving the customer-facing price. The customer then sees the approved vehicle and price and must initiate the existing Paystack checkout.
+
+Run `backend/supabase/VERIFY_SCHEMA.sql` after migration 015, then run `backend/supabase/tests/014_dispatch_contract.sql` and `backend/supabase/tests/015_package_category_contract.sql` in the Supabase SQL Editor. These checks create no users, orders, or payments. Resolve duplicate active rider assignments before migration 014 if it reports that the one-active-delivery unique index cannot be installed; do not delete delivery history to make the migration pass. Run the backend package-rule tests with `node --test tests/package-selection.test.mjs` from `backend/`.
+
+Do not apply migrations or deploy automatically as part of this code change. For a rollout after approval, first apply migration 015 after existing migrations through 014, run the schema/SQL checks above, then deploy the updated Render API and Vite frontend. The API change reuses existing environment settings; no new secrets or variables are required. Preserve the existing Paystack, routing and auto-completion configuration. Use the existing Netlify base directory `frontend`, build command `npm install --no-audit --no-fund && npm run build`, and publish directory `dist`. Do not add a Supabase service-role key to Netlify or any `VITE_*` setting.
+
+The operations dashboard's live alerts are backed by `dispatch_alerts`, `order_events`, and `rider_offers` and refresh through Supabase Realtime plus a 15-second fallback. It includes no-compatible-rider, exhausted/expired offer, overdue unassigned delivery, rider problem, and reassignment alerts. Delivery phone details are returned only through the authorised contact RPC. Reassignment after pickup requires operations to confirm custody and enter recovery/handover arrangements; the prior assignment remains in `order_assignment_history`.
+
+### Manual dispatch verification checklist
+
+- Verify the matrix for motorcycle, car, truck, and the explicitly retained legacy van/lorry aliases. Confirm truck offers do not appear for car or motorcycle orders.
+- Submit each package category without weight or dimension values. Confirm the selected category is stored and displayed in the customer order, rider offer, and admin order details; confirm the legacy measurement columns remain unchanged on existing orders.
+- Verify that new unmeasured quotes carry `requires_manual_review`, are not paid, and cannot be approved until operations records a verified vehicle. Change the vehicle and price in operations, confirm the customer sees the revised quote, and verify Paystack cannot be initialized before the customer initiates payment.
+- With no compatible approved rider online, verify the paid order remains unassigned and the operations dashboard shows the pending/no-compatible-rider state.
+- Bring a compatible approved rider online and verify the offer appears without changing payment status.
+- Decline with and without a reason; verify this rider no longer sees the offer, another compatible rider can, and the order remains pending.
+- Let an offer expire; verify timeout history, retry to another eligible rider, and the all-offers-exhausted alert when applicable.
+- Go offline or suspend a rider after an offer; verify acceptance fails and no new offer is returned. Verify suspending an assigned rider is blocked until the active delivery is resolved.
+- Have two authorised rider sessions attempt the same offer concurrently; verify exactly one assignment and one active order per rider.
+- Report problems both before and after pickup. Verify admin alerts; after pickup, verify reassignment cannot proceed without explicit custody confirmation and a recorded handover/recovery note.
+- Manually assign a different eligible rider and verify the assignment history records both riders and the operations reason.
+- Verify customer Realtime status and customer-visible activity after assignment, return-to-pool, and reassignment. Customer contact actions must expose the assigned rider's contact only after assignment; recipient details in an offer must be available only to that offer's approved, online, compatible rider.
+- Confirm unpaid orders never appear in rider offers, and no dispatch RPC changes Paystack payment records or payment status.
+- Attempt customer role escalation, rider self-approval/vehicle changes, unauthorised admin reassignment, and anonymous RPC execution; verify each is denied.
+- Recheck the existing chat, calls, maps, public tracking, customer confirmation, and Paystack callback/webhook workflows.
 
 ### Existing test accounts
 
@@ -141,15 +194,7 @@ Never prefix a secret with `VITE_`.
 
 ## Pricing
 
-Default pricing values are environment variables so you can change the business rules without rewriting the application.
-
-The initial engine uses:
-
-`base vehicle fee + Precise Distance & ETA × vehicle km rate`
-
-and a simple heavy-weight surcharge.
-
-These are starter values only. Replace them with FEMADEXDRIVE's real pricing policy.
+The quote engine uses the routing provider's verified road distance, a ₦1,500 base, the first 5 km included, ₦150 per additional kilometre, a ₦2,000 minimum, and a package-category estimate adjustment (₦0 small, ₦500 medium, ₦1,000 bulky). This is a suggested quote, not a confirmed charge: operations must verify the vehicle and may set a revised price, which is shown to the customer before checkout. No weight or dimensions are inferred from a selected category.
 
 ## Deployment
 
@@ -161,7 +206,7 @@ Use `femmadexdrive.netlify.app`. Set base directory `frontend`, build command `n
 
 ### Render API
 
-Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `ORS_API_KEY` for OpenRouteService road routing. Set `APP_ORIGIN=https://femmadexdrive.netlify.app`. The Paystack return callback is generated using Render's `RENDER_EXTERNAL_URL`; do not configure a Netlify callback URL. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. Apply Supabase migrations 001–011 before enabling production traffic.
+Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `ORS_API_KEY` for OpenRouteService road routing. Set `APP_ORIGIN=https://femmadexdrive.netlify.app`. The Paystack return callback is generated using Render's `RENDER_EXTERNAL_URL`; do not configure a Netlify callback URL. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. After approval, apply Supabase migrations 001–015 in order before deploying the updated quote API and customer UI; run both dispatch and package-category SQL contract tests before rollout.
 
 
 The API exposes `/health` and endpoints under `/api/`. Automatic delivery completion runs at startup and once per minute in the Render process. Locally, run `npm run dev` from `frontend/` and `npm start` from `backend/`; without `VITE_API_BASE_URL`, Vite proxies `/api` to the local backend at `127.0.0.1:10000` (override with `API_PROXY_TARGET` if needed). Frontend-only browser variables belong in `frontend/.env`, while server-only variables belong in `backend/.env`.
@@ -212,7 +257,7 @@ The local `frontend/.env` and `backend/.env` contain sensitive configuration and
 
 ## Delivery charge model
 
-The browser never sets the final charge. The backend geocodes both addresses, calculates Precise Distance & ETA and driving duration through the routing provider, selects a vehicle from package weight/size rules, and calculates the system estimate. The order begins in `price_review`; only an admin/supervisor can release it to `awaiting_payment` by setting the final price. Paystack checkout can only be initialized for an `awaiting_payment` order.
+The browser never sets the final charge. The backend geocodes both addresses, calculates route distance and duration, and creates a package-category estimate. The selected category is guidance, not proof of actual capacity: without verified measurements, the vehicle is provisional and the quote is flagged for operations review. The admin/supervisor records a verified vehicle and price before the order becomes payable. The customer can then choose to start Paystack checkout; dispatch logic never changes payment status.
 
 ## Customer ↔ rider chat
 
