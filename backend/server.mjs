@@ -63,9 +63,32 @@ const server = createServer(async (incoming, outgoing) => {
   const url = new URL(incoming.url || "/", `http://${incoming.headers.host || "localhost"}`);
   const origin = incoming.headers.origin || "";
 
-  if (url.pathname === "/health") {
+  if (url.pathname === "/" || url.pathname === "/api" || url.pathname === "/api/") {
     outgoing.writeHead(200, { "Content-Type": "application/json", ...Object.fromEntries(corsHeaders(origin).entries()) });
-    outgoing.end(JSON.stringify({ ok: true }));
+    outgoing.end(JSON.stringify({
+      ok: true,
+      service: "FemmaDexDrive API",
+      routes: [
+        "/health",
+        "/api/health",
+        "/api/quote",
+        "/api/create-order",
+        "/api/create-paystack-payment",
+        "/api/notify",
+        "/api/public-track",
+        "/api/reverse-geocode",
+        "/api/address-search",
+        "/api/paystack-callback",
+        "/api/paystack-webhook",
+        "/api/livekit-call",
+      ],
+    }));
+    return;
+  }
+
+  if (url.pathname === "/health" || url.pathname === "/api/health") {
+    outgoing.writeHead(200, { "Content-Type": "application/json", ...Object.fromEntries(corsHeaders(origin).entries()) });
+    outgoing.end(JSON.stringify({ ok: true, status: "healthy" }));
     return;
   }
 

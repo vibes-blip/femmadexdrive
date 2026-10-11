@@ -142,3 +142,18 @@ test("the current role model is fail-closed for a support role and old package/d
   assert.match(dispatchTests, /redact private locations/);
   assert.match(dispatchTests, /approved unpaid quote/);
 });
+
+test("live deployment health routes are aligned with the actual API surface", () => {
+  const server = read("../server.mjs");
+  assert.match(server, /url\.pathname === "\/api\/health"/);
+  assert.match(server, /url\.pathname === "\/health"/);
+  assert.match(server, /url\.pathname === "\/api"/);
+  assert.match(server, /routes:\s*\[/);
+  assert.match(server, /"\/api\/health"/);
+});
+
+test("Netlify CSP allows the currently observed inline script only by its exact hash", () => {
+  const headers = read("../../frontend/public/_headers");
+  assert.match(headers, /script-src 'self' 'sha256-mTJ4cJaTm2Gw95GeXEpZdvEEY9ybh6FZu1bwcNE7QlY='/);
+  assert.doesNotMatch(headers, /script-src[^;\r\n]*'unsafe-inline'/);
+});
