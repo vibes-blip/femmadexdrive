@@ -21,7 +21,16 @@ export default function AdminDispatchControls({supabase,session,profile,orders,r
  const eligibleRiders=useMemo(()=>{
   if(!selected||selected.rider_id||selected.payment_status!=="paid")return [];
   const declined=new Set(offers.filter(offer=>offer.order_id===selected.id&&offer.status==="declined").map(offer=>offer.rider_id));
-  return riders.filter(rider=>rider.approval_status==="approved"&&rider.is_online&&!activeRiders.has(rider.id)&&compatible(rider.vehicle_type,selected.vehicle_type)&&!declined.has(rider.id));
+  return riders.filter(rider=>{
+   const routeOffer=offers.find(offer=>offer.order_id===selected.id&&offer.rider_id===rider.id&&offer.status==="offered");
+   const routeCheckedAt=routeOffer?.route_checked_at?Date.parse(routeOffer.route_checked_at):NaN;
+   const fastRouteEligible=selected.delivery_speed!=="fast"||(
+    routeOffer?.route_check_status==="eligible"&&Number.isInteger(routeOffer.pickup_eta_minutes)&&
+    Number.isFinite(routeCheckedAt)&&Date.now()-routeCheckedAt>=0&&Date.now()-routeCheckedAt<=120000
+   );
+   return rider.approval_status==="approved"&&rider.is_online&&!activeRiders.has(rider.id)&&
+    compatible(rider.vehicle_type,selected.vehicle_type)&&!declined.has(rider.id)&&fastRouteEligible;
+  });
  },[selected,riders,activeRiders,offers]);
  const needsHandover=["picked_up","on_the_way","at_door"].includes(selected?.status);
 
@@ -103,8 +112,8 @@ export default function AdminDispatchControls({supabase,session,profile,orders,r
   <div className="metrics">
    <div className="metric"><b>{orders.filter(order=>order.payment_status==="paid"&&!order.rider_id&&!terminal.has(order.status)).length}</b><span>Paid and awaiting rider</span></div>
    <div className="metric"><b>{orders.filter(order=>order.rider_id&&!terminal.has(order.status)).length}</b><span>Assigned and active</span></div>
-   <div className="metric"><b>{alerts.filter(alert=>["no_compatible_rider","all_offers_exhausted"].includes(alert.alert_type)).length}</b><span>No rider / offers exhausted</span></div>
-   <div className="metric"><b>{alerts.filter(alert=>["rider_problem","reassignment_required","unassigned_overdue"].includes(alert.alert_type)).length}</b><span>Needs intervention</span></div>
+   <div className="metric"><b>{alerts.filter(alert=>["no_compatible_rider","all_offers_exhausted","fast_pickup_unavailable"].includes(alert.alert_type)).length}</b><span>No rider / offers exhausted</span></div>
+   <div className="metric"><b>{alerts.filter(alert=>["rider_problem","reassignment_required","unassigned_overdue","pickup_deadline_missed"].includes(alert.alert_type)).length}</b><span>Needs intervention</span></div>
   </div>
   <h3>Open admin notifications</h3>
   {!alerts.length?<p className="address-hint">No open dispatch alerts.</p>:<div className="dispatch-event-list">{alerts.map(alert=><article className="dispatch-event" key={alert.id}>
@@ -160,7 +169,7 @@ export default function AdminDispatchControls({supabase,session,profile,orders,r
   </div>}
 
   <h3>Recent rider responses and delivery problems</h3>
-  <div className="dispatch-event-list">{events.filter(event=>["rider_declined","rider_offer_timed_out","rider_problem_reported","admin_returned_to_pool","admin_assigned_rider","admin_cancelled"].includes(event.event)).slice(0,20).map(event=><article className="dispatch-event" key={event.id}>
+  <div className="dispatch-event-list">{events.filter(event=>["rider_declined","rider_offer_timed_out","rider_problem_reported","pickup_deadline_missed","admin_returned_to_pool","admin_assigned_rider","admin_cancelled"].includes(event.event)).slice(0,20).map(event=><article className="dispatch-event" key={event.id}>
    <div><b>{orderName(event.order_id)} · {event.event.replaceAll("_"," ")}</b><span>{riderName(event.actor_id)?`${riderName(event.actor_id)} · `:""}{event.note||"No reason supplied."}</span></div>
    <small>{stamp(event.created_at)}</small>
   </article>)}</div>

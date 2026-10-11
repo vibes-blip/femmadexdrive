@@ -34,10 +34,12 @@ test("the published package suggestions use supported dispatch vehicle categorie
   assert.match(compatibilitySql, /'van'/);
   assert.match(compatibilitySql, /'truck',\s*'lorry'/);
   assert.match(dispatchSqlContract, /vehicle_compatible\('lorry', 'truck'\)/);
-  assert.match(packageUi, /Suggested vehicle: Motorcycle/);
-  assert.match(packageUi, /Suggested vehicle: Motorcycle or car/);
-  assert.match(packageUi, /Suggested vehicle: Car, van, truck or lorry/);
-  assert.doesNotMatch(packageUi, /Suggested vehicle:[^"]*pickup/i);
+  assert.match(packageUi, /Small & Medium Packages/);
+  assert.match(packageUi, /Large & Bulky Goods/);
+  assert.match(packageUi, /Fast Delivery/);
+  assert.match(packageUi, /Normal rider eligible/);
+  assert.match(packageUi, /Suitable vehicle required/);
+  assert.match(packageUi, /2× the standard quote/);
   assert.match(packageUi, /oversized or uncertain loads may need inspection/i);
 });
 

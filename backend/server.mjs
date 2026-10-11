@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sb } from "./netlify/functions/_lib.mjs";
+import { refreshFastOfferRouteChecks } from "./netlify/functions/_fast-dispatch.mjs";
 
 const localEnv = fileURLToPath(new URL("./.env", import.meta.url));
 if (existsSync(localEnv)) process.loadEnvFile(localEnv);
@@ -19,6 +20,8 @@ const routes = new Map([
   ["paystack-callback", { method: "GET", load: () => import("./netlify/functions/paystack-callback.mjs") }],
   ["paystack-webhook", { method: "POST", load: () => import("./netlify/functions/paystack-webhook.mjs") }],
   ["livekit-call", { method: "POST", load: () => import("./netlify/functions/livekit-call.mjs") }],
+  ["rider-location", { method: "POST", load: () => import("./netlify/functions/rider-location.mjs") }],
+  ["rider-offers", { method: "POST", load: () => import("./netlify/functions/rider-offers.mjs") }],
 ]);
 
 function corsHeaders(origin) {
@@ -81,6 +84,8 @@ const server = createServer(async (incoming, outgoing) => {
         "/api/paystack-callback",
         "/api/paystack-webhook",
         "/api/livekit-call",
+        "/api/rider-location",
+        "/api/rider-offers",
       ],
     }));
     return;
@@ -140,10 +145,35 @@ async function autoCompleteDeliveries() {
   }
 }
 
+let dispatchRefreshPromise;
+async function refreshDispatchQueue() {
+  if (dispatchRefreshPromise) return dispatchRefreshPromise;
+  dispatchRefreshPromise = (async () => {
+    const db = sb();
+    const {error:dispatchError} = await db.rpc("dispatch_pending_orders");
+    if (dispatchError) throw dispatchError;
+    const checked = await refreshFastOfferRouteChecks(db);
+    const {data:alerts,error:alertError} = await db.rpc("refresh_fast_delivery_alerts");
+    if (alertError) throw alertError;
+    if (checked > 0 || Number(alerts) > 0) {
+      console.log(`Dispatch refresh checked ${checked} fast routes and recorded ${Number(alerts) || 0} pickup deadline alerts`);
+    }
+  })();
+  try {
+    await dispatchRefreshPromise;
+  } catch (error) {
+    console.error("Dispatch queue refresh failed", error.message);
+  } finally {
+    dispatchRefreshPromise = null;
+  }
+}
+
 server.listen(port, "0.0.0.0", () => {
   console.log(`FemmaDexDrive API listening on port ${port}`);
   void autoCompleteDeliveries();
+  void refreshDispatchQueue();
   setInterval(autoCompleteDeliveries, 60_000);
+  setInterval(refreshDispatchQueue, 30_000);
 });
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

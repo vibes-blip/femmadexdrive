@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {calculateSuggestedPrice, resolvePackageSelection} from "../netlify/functions/_package-selection.mjs";
+import {calculatePriceForDeliverySpeed, calculateSuggestedPrice, resolvePackageSelection} from "../netlify/functions/_package-selection.mjs";
 
 test("books with a package category and no measurements", () => {
   const selection = resolvePackageSelection({packageCategory: "small"});
@@ -62,4 +62,12 @@ test("original route pricing and package adjustments remain unchanged", () => {
   assert.equal(calculateSuggestedPrice(10000, "medium"), 2750);
   assert.equal(calculateSuggestedPrice(10000, "large"), 3250);
   assert.equal(calculateSuggestedPrice(1000, "small"), 2000);
+});
+
+test("fast delivery doubles the standard quote without adding a flat surcharge", () => {
+  assert.equal(calculatePriceForDeliverySpeed(2000, "standard"), 2000);
+  assert.equal(calculatePriceForDeliverySpeed(2500, "fast"), 5000);
+  assert.equal(calculatePriceForDeliverySpeed(2750, "fast"), 5500);
+  assert.throws(() => calculatePriceForDeliverySpeed(-1, "fast"), /standard delivery price/);
+  assert.throws(() => calculatePriceForDeliverySpeed(2000, "priority"), /valid delivery speed/);
 });

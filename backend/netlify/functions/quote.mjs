@@ -1,6 +1,6 @@
 import {sb,json,body,err,userFromRequest,HttpError} from "./_lib.mjs";
 import {reverseGeocode} from "./_geocoding.mjs";
-import {calculateSuggestedPrice,resolvePackageSelection} from "./_package-selection.mjs";
+import {calculatePriceForDeliverySpeed,calculateSuggestedPrice,resolvePackageSelection} from "./_package-selection.mjs";
 
 const ORS_DIRECTIONS_URL="https://api.openrouteservice.org/v2/directions/driving-car/geojson";
 const coordinate=(point,key,min,max)=>{
@@ -12,7 +12,7 @@ const coordinate=(point,key,min,max)=>{
  return Number.isFinite(number)&&number>=min&&number<=max?number:null;
 };
 
-export {calculateSuggestedPrice};
+export {calculatePriceForDeliverySpeed,calculateSuggestedPrice};
 
 export default async req=>{
  if(req.method==="OPTIONS")return new Response("",{status:204});
@@ -20,6 +20,8 @@ export default async req=>{
   const user=await userFromRequest(req);
   const request=await body(req);
   if(!request||typeof request!=="object"||Array.isArray(request))throw new HttpError("Invalid delivery quote request.",400);
+  const deliverySpeed=request.deliverySpeed===undefined?"standard":request.deliverySpeed;
+  if(!["standard","fast"].includes(deliverySpeed))throw new HttpError("Select a valid delivery speed.",400);
   const db=sb();
   const {data:profile,error:profileError}=await db.from("profiles").select("role").eq("id",user.id).maybeSingle();
   if(profileError){
@@ -47,6 +49,9 @@ export default async req=>{
    throw new HttpError(selectionError.message,400);
   }
   const {packageCategory,packageSize,vehicleType,measurements,requiresManualReview}=packageSelection;
+  if(deliverySpeed==="fast"&&!["small","medium"].includes(packageCategory)){
+   throw new HttpError("Fast delivery is available for small and medium packages only.",400);
+  }
 
   let pickup,dropoff;
   try{
@@ -102,8 +107,9 @@ export default async req=>{
   }
 
   const distanceKm=distanceMeters/1000;
-  const suggestedPrice=calculateSuggestedPrice(distanceMeters,packageSize);
-  const {data:order,error}=await db.rpc("create_delivery_quote_with_category",{
+  const standardSuggestedPrice=calculateSuggestedPrice(distanceMeters,packageSize);
+  const suggestedPrice=calculatePriceForDeliverySpeed(standardSuggestedPrice,deliverySpeed);
+  const {data:order,error}=await db.rpc("create_delivery_quote_with_options",{
    p_customer_id:user.id,
    p_pickup_address:pickup.address,
    p_pickup_latitude:pickupLatitude,
@@ -124,7 +130,8 @@ export default async req=>{
    p_distance_meters:distanceMeters,
    p_duration_seconds:durationSeconds,
    p_suggested_price:suggestedPrice,
-   p_requires_manual_review:requiresManualReview
+   p_requires_manual_review:requiresManualReview,
+   p_delivery_speed:deliverySpeed
   });
   if(error){
    console.error("Delivery quote persistence failed",{code:error.code,message:error.message});
@@ -145,6 +152,11 @@ export default async req=>{
    distanceKm:Number(distanceKm.toFixed(2)),
    durationSeconds,
    durationMinutes:Math.ceil(durationSeconds/60),
+   deliverySpeed,
+   standardSuggestedPrice,
+   suggestedPrice,
+   priceMultiplier:deliverySpeed==="fast"?2:1,
+   deliveryDeadlineHours:deliverySpeed==="fast"?2:null,
    currency:"NGN"
   });
  }catch(error){

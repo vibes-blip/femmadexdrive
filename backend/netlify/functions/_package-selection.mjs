@@ -83,3 +83,13 @@ export function calculateSuggestedPrice(distanceMeters, packageSize) {
   const packageAdjustment = packageSize === "small" ? 0 : packageSize === "medium" ? 500 : 1000;
   return Math.max(2000, Math.round(1500 + distanceCharge)) + packageAdjustment;
 }
+
+export function calculatePriceForDeliverySpeed(standardPrice, deliverySpeed = "standard") {
+  if (!Number.isFinite(standardPrice) || standardPrice <= 0) {
+    throw new Error("A valid standard delivery price is required.");
+  }
+  if (!["standard", "fast"].includes(deliverySpeed)) {
+    throw new Error("Select a valid delivery speed.");
+  }
+  return deliverySpeed === "fast" ? standardPrice * 2 : standardPrice;
+}

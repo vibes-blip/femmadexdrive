@@ -78,6 +78,9 @@ footer{border-color:var(--line)}footer p,footer button,footer>small{color:var(--
 .package-card-copy strong{font-size:14px;color:var(--text)}
 .package-card-copy small{font-size:11px;line-height:1.5;color:var(--muted);font-weight:500}
 .package-card-copy .package-vehicle{padding-top:7px;border-top:1px solid var(--line);color:var(--accent)}
+.package-size-estimate{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;color:var(--muted);font-size:12px}
+.package-size-estimate label{display:flex;align-items:center;gap:5px;margin:0;color:var(--text)}
+.package-size-estimate input{accent-color:var(--accent)}
 .package-safety{margin:10px 0 0;color:var(--muted);font-size:11px;line-height:1.6}
 .loading-screen{position:relative;overflow:hidden}
 .loading-track{position:relative;width:min(440px,80vw);height:118px;margin-bottom:16px;overflow:hidden;border-bottom:2px solid #36d59d55;border-radius:5px}
