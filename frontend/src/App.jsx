@@ -33,12 +33,12 @@ function useSession(){
  const [session,setSession]=useState(null),[profile,setProfile]=useState(null),[loading,setLoading]=useState(!!supabase),[profileLoading,setProfileLoading]=useState(false),[profileError,setProfileError]=useState("");
  useEffect(()=>{if(!supabase){setLoading(false);return}let mounted=true,authEventReceived=false;const {data}=supabase.auth.onAuthStateChange((_,nextSession)=>{authEventReceived=true;if(!mounted)return;setSession(nextSession);setLoading(false)});const timeout=setTimeout(()=>{if(mounted&&!authEventReceived)setLoading(false)},10000);supabase.auth.getSession().then(({data:result,error})=>{if(!mounted||authEventReceived)return;if(error)console.error("Could not restore Supabase session",error.message);setSession(result?.session||null);setLoading(false)}).catch(error=>{if(!mounted||authEventReceived)return;console.error("Could not restore Supabase session",error);setSession(null);setLoading(false)});return()=>{mounted=false;clearTimeout(timeout);data.subscription.unsubscribe()}},[]);
  useEffect(()=>{if(!supabase||!session){setProfile(null);setProfileLoading(false);setProfileError("");return}let mounted=true;setProfile(null);setProfileLoading(true);setProfileError("");(async()=>{try{const {data,error}=await supabase.from("profiles").select("*").eq("id",session.user.id).maybeSingle();if(error)throw new Error(`Could not load your account profile: ${error.message}`);if(!data)throw new Error("Your account profile is missing. Ask operations to finish setting up your account.");if(data.role==="rider"){const {data:r,error:riderError}=await supabase.from("riders").select("*").eq("id",session.user.id).maybeSingle();if(riderError)throw new Error(`Could not load your rider profile: ${riderError.message}`);if(mounted)setProfile({...data,rider:r||null})}else if(mounted)setProfile(data)}catch(error){if(mounted){console.error("Could not load signed-in user profile",error);setProfileError(error.message)}}finally{if(mounted)setProfileLoading(false)}})();return()=>{mounted=false}},[session?.user?.id]);
- return {session,profile,loading,profileLoading,profileError}
+ return {session,profile,setProfile,loading,profileLoading,profileError}
 }
 
 export default function App(){
  const [page,setPage]=useState(path()),[modal,setModal]=useState(null),[toast,setToast]=useState(""),[menu,setMenu]=useState(false);
- const {session,profile,loading,profileLoading,profileError}=useSession();
+ const {session,profile,setProfile,loading,profileLoading,profileError}=useSession();
  useEffect(()=>{const f=()=>setPage(path());addEventListener("popstate",f);return()=>removeEventListener("popstate",f)},[]);
  useEffect(()=>{
   if(location.pathname.replace(/\/+$/,"")!=="/.netlify/functions/paystack-callback")return;
