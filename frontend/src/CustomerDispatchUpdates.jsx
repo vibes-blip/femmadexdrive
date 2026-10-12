@@ -10,7 +10,14 @@ const readable={
  rider_problem_reported:"The assigned rider reported a delivery problem. Operations is reviewing it.",
  status_changed:"Delivery progress updated",
  customer_confirmed:"Delivery confirmed",
- admin_cancelled:"Delivery cancelled by operations"
+ admin_cancelled:"Delivery cancelled by operations",
+ sender_unavailable_at_pickup:"Sender was unavailable at pickup; delivery cancelled without an automatic payment change",
+ recipient_unavailable_reported:"Recipient was unavailable; Operations is reviewing a safe return",
+ recipient_unavailability_resolved:"Operations confirmed the recipient can receive the goods",
+ customer_notified_goods_ready:"Customer was notified that returned goods are ready for collection",
+ returned_goods_collected:"Returned goods were collected",
+ returned_goods_unclaimed:"Collection window ended; Operations will review next steps",
+ redelivery_quote_created:"A redelivery quote is ready for secure payment"
 };
 
 export default function CustomerDispatchUpdates({supabase,customerId,toast}){

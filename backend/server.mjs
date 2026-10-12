@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sb } from "./netlify/functions/_lib.mjs";
 import { refreshFastOfferRouteChecks } from "./netlify/functions/_fast-dispatch.mjs";
+import { processSupportEscalations } from "./netlify/functions/_support-escalation.mjs";
 
 const localEnv = fileURLToPath(new URL("./.env", import.meta.url));
 if (existsSync(localEnv)) process.loadEnvFile(localEnv);
@@ -22,6 +23,7 @@ const routes = new Map([
   ["livekit-call", { method: "POST", load: () => import("./netlify/functions/livekit-call.mjs") }],
   ["rider-location", { method: "POST", load: () => import("./netlify/functions/rider-location.mjs") }],
   ["rider-offers", { method: "POST", load: () => import("./netlify/functions/rider-offers.mjs") }],
+  ["care-chat", { method: "POST", load: () => import("./netlify/functions/care-chat.mjs") }],
 ]);
 
 function corsHeaders(origin) {
@@ -86,6 +88,7 @@ const server = createServer(async (incoming, outgoing) => {
         "/api/livekit-call",
         "/api/rider-location",
         "/api/rider-offers",
+        "/api/care-chat",
       ],
     }));
     return;
@@ -172,8 +175,12 @@ server.listen(port, "0.0.0.0", () => {
   console.log(`FemmaDexDrive API listening on port ${port}`);
   void autoCompleteDeliveries();
   void refreshDispatchQueue();
+  void processSupportEscalations().catch(error => console.error("Support escalation processing failed", error.message));
   setInterval(autoCompleteDeliveries, 60_000);
   setInterval(refreshDispatchQueue, 30_000);
+  setInterval(() => {
+    void processSupportEscalations().catch(error => console.error("Support escalation processing failed", error.message));
+  }, 15_000);
 });
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

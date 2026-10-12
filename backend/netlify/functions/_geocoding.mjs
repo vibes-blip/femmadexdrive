@@ -13,19 +13,19 @@ export function fetchGeocoding(url){
 }
 
 function formatNominatimAddress(item,lat,lng){
- const parts=item.address||{},street=[parts.house_number,parts.road].filter(Boolean).join(" "),title=item.name||parts.amenity||parts.shop||parts.tourism||parts.leisure||parts.building||street||parts.neighbourhood||parts.suburb||parts.village||parts.town||parts.city||parts.county;
+ const parts=item.address||{},street=[parts.house_number,parts.road].filter(Boolean).join(" "),title=parts.house_number&&parts.road?street:item.name||parts.amenity||parts.shop||parts.tourism||parts.leisure||parts.building||street||parts.neighbourhood||parts.suburb||parts.village||parts.town||parts.city||parts.county;
  const locality=[street,parts.neighbourhood,parts.suburb,parts.village,parts.town,parts.city,parts.state,parts.country].filter((part,index,all)=>part&&all.indexOf(part)===index&&part!==title);
  const address=[title,...locality].filter(Boolean).join(", ");
- return address?{title:title||"Selected location",details:locality.join(", "),address,lat,lng}:null;
+ return address?{title:title||"Selected location",details:locality.join(", "),address,lat,lng,provider:"Nominatim",resultType:item.addresstype||null,houseNumber:parts.house_number||null,precision:parts.house_number?"building":parts.road?"street":"place"}:null;
 }
 
 function formatPhotonAddress(collection,lat,lng){
  const feature=collection.features?.find(item=>item.properties);
  if(!feature)return null;
- const properties=feature.properties,street=[properties.housenumber,properties.street].filter(Boolean).join(" "),title=properties.name||street||properties.district||properties.locality||properties.city||properties.county||properties.state;
+ const properties=feature.properties,street=[properties.housenumber,properties.street].filter(Boolean).join(" "),title=properties.housenumber?street:properties.name||street||properties.district||properties.locality||properties.city||properties.county||properties.state;
  const locality=[street,properties.district,properties.locality,properties.city,properties.county,properties.state,properties.country].filter((part,index,all)=>part&&all.indexOf(part)===index&&part!==title);
  const address=[title,...locality].filter(Boolean).join(", ");
- return address?{title:title||"Selected location",details:locality.join(", "),address,lat,lng}:null;
+ return address?{title:title||"Selected location",details:locality.join(", "),address,lat,lng,provider:"Photon",resultType:properties.type||properties.osm_value||null,houseNumber:properties.housenumber||null,precision:properties.housenumber?"building":properties.street?"street":"place"}:null;
 }
 
 export async function reverseGeocode(lat,lng){

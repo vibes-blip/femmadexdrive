@@ -33,6 +33,7 @@
     rel="canonical"
     href="https://femmadexdrive.netlify.app/"
   />
+  <link rel="manifest" href="/manifest.webmanifest" />
 
   <!-- Open Graph / Facebook / WhatsApp -->
   <meta
@@ -114,6 +115,10 @@
       "@type": "Country",
       "name": "Nigeria"
     },
+    "serviceArea": {
+      "@type": "AdministrativeArea",
+      "name": "Lagos and other serviceable locations in Nigeria"
+    },
     "serviceType": [
       "Logistics",
       "Courier Services",
@@ -128,6 +133,10 @@
 
   <body>
     <div id="root"></div>
+    <noscript>
+      FemmaDexDrive provides dispatch and parcel delivery services in Lagos and other serviceable Nigerian locations.
+      Book at https://femmadexdrive.netlify.app/book after enabling JavaScript, track at /track, and read dispatch terms at /terms.
+    </noscript>
 
     <script type="module" src="/src/main.jsx"></script>
   </body>

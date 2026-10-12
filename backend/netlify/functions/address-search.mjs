@@ -1,15 +1,15 @@
-import {fetchGeocoding,reverseGeocode} from "./_geocoding.mjs";
+import {reverseGeocode} from "./_geocoding.mjs";
 import {corsHeaders} from "./_lib.mjs";
 
 const headers={"Content-Type":"application/json",...corsHeaders("GET, OPTIONS")};
 const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers});
 const validPoint=(lat,lng)=>Number.isFinite(lat)&&lat>=-90&&lat<=90&&Number.isFinite(lng)&&lng>=-180&&lng<=180;
-const formatAddress=properties=>{
+export const formatAddress=properties=>{
  const street=[properties.housenumber,properties.street].filter(Boolean).join(" ");
- const title=properties.name||street||properties.district||properties.locality||properties.city||properties.county||properties.state;
+ const title=properties.housenumber?street:properties.name||street||properties.district||properties.locality||properties.city||properties.county||properties.state;
  const context=[street,properties.district,properties.locality,properties.city,properties.county,properties.state,properties.country].filter((part,index,all)=>part&&all.indexOf(part)===index&&part!==title);
  const address=[title,...context].filter(Boolean).join(", ");
- return {title:title||"Selected location",address,details:context.join(", ")};
+ return {title:title||"Selected location",address,details:context.join(", "),provider:"Photon",resultType:properties.type||properties.osm_value||null,houseNumber:properties.housenumber||null,precision:properties.housenumber?"building":properties.street?"street":"place"};
 };
 export default async req=>{
  if(req.method==="OPTIONS")return new Response("",{status:204,headers});

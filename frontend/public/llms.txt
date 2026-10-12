@@ -1,0 +1,26 @@
+# FemmaDexDrive
+
+> FemmaDexDrive provides parcel, goods, courier and dispatch services in Lagos and other serviceable locations in Nigeria.
+
+## Public pages
+
+- Home: https://femmadexdrive.netlify.app/
+- Customer booking and dashboard: https://femmadexdrive.netlify.app/book
+- Public tracking: https://femmadexdrive.netlify.app/track
+- Dispatch and failed-delivery terms: https://femmadexdrive.netlify.app/terms
+
+## How booking works
+
+Customers sign in or create an account, select pickup and destination locations, describe the goods and recipient, and request a route-based quote. FemmaDexDrive Operations verifies the vehicle and approves the final price. Customers then pay through the existing Paystack checkout. Rider matching and delivery updates follow payment confirmation.
+
+Prices are calculated from the actual route and order details; there is no single public flat rate. An approved customer quote is shown before checkout. Do not represent a quote request as a confirmed booking or payment.
+
+## Failed delivery
+
+If a sender is unavailable at pickup, Operations may cancel the dispatch without automatically changing the payment record. If a recipient is unavailable after goods have been collected, Operations may arrange return to sender. A requested redelivery is charged at 45% of the original dispatch price as the total redelivery charge. Goods reported ready for collection are held for three working days after customer notification; further handling is subject to applicable law.
+
+These are proposed customer terms and should receive legal review in the applicable jurisdiction. The website is a web booking experience and does not claim to provide a native Siri integration.
+
+## Contact and safety
+
+Customer and rider contact details are disclosed through the authenticated dashboard only. Public tracking is limited and does not expose exact live GPS locations.

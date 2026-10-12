@@ -2,6 +2,7 @@ import React,{useCallback,useEffect,useId,useRef,useState} from "react";
 import * as maplibregl from "maplibre-gl";
 import {Clock3,LocateFixed,MapPin,Navigation,Search,X} from "lucide-react";
 import {apiUrl} from "./api.js";
+import {addressWithHouseNumber,houseNumberFromInput} from "./address-format.js";
 
 const OSM_STYLE={
  version:8,
@@ -18,6 +19,17 @@ const OSM_STYLE={
  layers:[{id:"openstreetmap-raster",type:"raster",source:"openstreetmap"}]
 };
 const validPoint=(lat,lng)=>lat!==null&&lat!==undefined&&lat!==""&&lng!==null&&lng!==undefined&&lng!==""&&Number.isFinite(Number(lat))&&Number(lat)>=-90&&Number(lat)<=90&&Number.isFinite(Number(lng))&&Number(lng)>=-180&&Number(lng)<=180;
+const addressForOrder=(address,verification,instructions)=>{
+ const numberMismatch=verification?.providerHouseNumber&&verification.customerHouseNumber&&verification.providerHouseNumber.toLowerCase()!==verification.customerHouseNumber.toLowerCase();
+ const precision=verification?.precision==="building"&&verification.providerHouseNumber
+  ?`Location precision: provider result includes house number ${verification.providerHouseNumber}; confirm the correct entrance.${numberMismatch?` Customer-entered number ${verification.customerHouseNumber} differs and needs manual verification.`:""}`
+  :verification?.precision==="street"
+   ?"Location precision: provider result is street-level; the building number was not independently verified."
+   :verification
+    ?"Location precision: provider returned a place-level result; exact building precision is unavailable."
+    :"";
+ return [String(address||"").trim(),precision,String(instructions||"").trim()?`Delivery instructions: ${String(instructions).trim()}`:""].filter(Boolean).join("\n");
+};
 export function locationUnavailableMessage(){
  if(typeof window!=="undefined"&&!window.isSecureContext)return "Browser location requires a secure HTTPS connection. Enter an address or choose a location on the map instead.";
  if(typeof navigator==="undefined"||!navigator.geolocation)return "Location is not available in this browser. Enter an address or choose a location on the map instead.";
@@ -72,6 +84,11 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
  const inputId=useId();
  const [results,setResults]=useState([]);
  const [recent,setRecent]=useRecentLocations();
+ const [query,setQuery]=useState(value||"");
+ const [verification,setVerification]=useState(null);
+ const [confirmedAddress,setConfirmedAddress]=useState("");
+ const [instructions,setInstructions]=useState("");
+ const [addressConfirmed,setAddressConfirmed]=useState(false);
  const [near,setNear]=useState(null);
  const [searching,setSearching]=useState(false);
  const [nearbyBusy,setNearbyBusy]=useState(false);
@@ -83,8 +100,12 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
  const selectionBusy=useRef(false);
 
  useEffect(()=>{
-  const query=value.trim();
-  if((query&&query.length<3)||(!query&&!near)){
+  if(!coordinates&&value&&!query)setQuery(value);
+ },[coordinates,value,query]);
+
+ useEffect(()=>{
+  const searchText=query.trim();
+  if((searchText&&searchText.length<3)||(!searchText&&!near)){
    setResults([]);
    setError("");
    setSearching(false);
@@ -96,8 +117,8 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
    setSearching(true);
    setError("");
    try{
-    const matches=query
-     ?await searchAddresses(query,{proximity:near,signal:controller.signal})
+    const matches=searchText
+     ?await searchAddresses(searchText,{proximity:near,signal:controller.signal})
      :[await reverseGeocode(near.lat,near.lng,controller.signal)];
     if(current)setResults(matches);
    }catch(requestError){
@@ -114,7 +135,7 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
    clearTimeout(timer);
    controller.abort();
   };
- },[value,near]);
+ },[query,near]);
 
  const choose=async point=>{
   if(selectionBusy.current)return false;
@@ -123,14 +144,29 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
   setSelecting(true);
   setError("");
   try{
-   const selected=await reverseGeocode(point.lat,point.lng);
+   const reversed=await reverseGeocode(point.lat,point.lng);
    if(version!==selectionVersion.current)return false;
-   onSelect(selected.address,{lat:selected.lat,lng:selected.lng});
+   const originalInput=query.trim();
+   const providerAddress=String(point.address||reversed.address).trim();
+   const providerHouseNumber=point.houseNumber||(point.precision?"":reversed.houseNumber)||"";
+   const customerHouseNumber=houseNumberFromInput(originalInput)||point.customerHouseNumber||providerHouseNumber;
+   const precision=point.precision||reversed.precision||"place";
+   const selected={...reversed,address:providerAddress,title:point.title||reversed.title,details:point.details||reversed.details,provider:point.provider||reversed.provider,resultType:point.resultType||reversed.resultType,houseNumber:providerHouseNumber,customerHouseNumber,precision};
+   const address=precision==="building"&&providerHouseNumber&&!originalInput
+    ?providerAddress
+    :addressWithHouseNumber(providerAddress,customerHouseNumber,providerHouseNumber);
+   const addressVerification={address:providerAddress,precision,provider:point.provider||reversed.provider,resultType:point.resultType||reversed.resultType,providerHouseNumber,customerHouseNumber,originalInput};
+   setVerification(addressVerification);
+   setConfirmedAddress(address);
+   setInstructions("");
+   setAddressConfirmed(false);
+   onSelect(addressForOrder(address,addressVerification),{lat:selected.lat,lng:selected.lng},addressVerification);
    setRecent(current=>{
-    const next=[selected,...current.filter(item=>item.address!==selected.address)].slice(0,6);
+    const next=[{...selected,customerHouseNumber},...current.filter(item=>item.address!==selected.address||item.customerHouseNumber!==customerHouseNumber)].slice(0,6);
     try{localStorage.setItem("fdd-recent-locations",JSON.stringify(next))}catch{}
     return next;
    });
+   setQuery("");
    setResults([]);
    setFocused(false);
    return true;
@@ -149,11 +185,31 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
   }
  };
 
- const changeAddress=value=>{
+ const changeAddress=nextValue=>{
   selectionVersion.current++;
   selectionBusy.current=false;
   setSelecting(false);
-  onChange(value);
+  setQuery(nextValue);
+  setVerification(null);
+  setConfirmedAddress("");
+  setInstructions("");
+  setAddressConfirmed(false);
+  onChange(nextValue);
+ };
+
+ const publishConfirmedAddress=(nextAddress,nextInstructions=instructions)=>{
+  const completeAddress=addressForOrder(nextAddress,verification,nextInstructions);
+  setConfirmedAddress(nextAddress);
+  onSelect(completeAddress,{lat:Number(coordinates.lat),lng:Number(coordinates.lng)},verification);
+  setAddressConfirmed(false);
+ };
+
+ const changeHouseNumber=nextValue=>{
+  if(!coordinates)return;
+  const base=verification?.address||confirmedAddress||value;
+  const nextAddress=addressWithHouseNumber(base,nextValue,verification?.providerHouseNumber);
+  setVerification(current=>current?{...current,customerHouseNumber:nextValue}:current);
+  publishConfirmedAddress(nextAddress);
  };
 
  const searchNearby=()=>{
@@ -175,7 +231,7 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
   <div className="address-field">
    <label htmlFor={inputId}>{label}</label>
    <div className="address"><MapPin size={17}/>
-    <input id={inputId} required value={value} onFocus={()=>setFocused(true)} onBlur={()=>setTimeout(()=>setFocused(false),160)} onChange={event=>changeAddress(event.target.value)} placeholder="Type a street, place or landmark"/>
+    <input id={inputId} required={!coordinates} value={query} onFocus={()=>setFocused(true)} onBlur={()=>setTimeout(()=>setFocused(false),160)} onChange={event=>changeAddress(event.target.value)} placeholder="Type a street, place or landmark"/>
     <button type="button" aria-label="Use current location" onClick={locate}>{locating?<span className="spinner small"/>:<LocateFixed size={16}/>}</button>
     <button type="button" aria-label="Choose location on map" onClick={()=>setMapOpen(true)}><Navigation size={16}/></button>
    </div>
@@ -185,10 +241,27 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
    {searching&&<small className="address-hint">Searching real addresses…</small>}
    {error&&<small className="address-error" role="alert">{error}</small>}
    {focused&&results.length>0&&<><div className="address-suggestions" role="listbox" aria-label="Matching addresses">{results.map((point,index)=><button key={`${point.lat}-${point.lng}-${index}`} type="button" role="option" disabled={selecting} onMouseDown={event=>event.preventDefault()} onClick={()=>choose(point)}><MapPin size={15}/><span><b>{point.title}</b><small>{point.details}</small></span></button>)}</div><small className="address-attribution">Address data © <a href='https://www.openstreetmap.org/copyright' target='_blank' rel='noopener noreferrer'>OpenStreetMap contributors</a></small></>}
-   {focused&&!searching&&!error&&value.trim().length>=3&&results.length===0&&<small className="address-hint">No matching addresses. Try a street, landmark, nearby search, or choose on the map.</small>}
-   {focused&&!value.trim()&&!near&&recent.length>0&&<div className="address-suggestions recent-locations" role="listbox" aria-label="Recent locations"><small>Recent locations</small>{recent.map((point,index)=><button key={`${point.lat}-${point.lng}-${index}`} type="button" role="option" onMouseDown={event=>event.preventDefault()} onClick={()=>choose(point)}><Clock3 size={15}/><span><b>{point.title||point.address}</b><small>{point.address}</small></span></button>)}</div>}
-   {focused&&!value.trim()&&!near&&recent.length===0&&<small className="address-hint">Type to search addresses, choose a recent location, or search near you.</small>}
+   {focused&&!searching&&!error&&query.trim().length>=3&&results.length===0&&<small className="address-hint">No matching addresses. Try a street, landmark, nearby search, or choose on the map.</small>}
+   {focused&&!query.trim()&&!near&&recent.length>0&&<div className="address-suggestions recent-locations" role="listbox" aria-label="Recent locations"><small>Recent locations</small>{recent.map((point,index)=><button key={`${point.lat}-${point.lng}-${index}`} type="button" role="option" onMouseDown={event=>event.preventDefault()} onClick={()=>choose(point)}><Clock3 size={15}/><span><b>{point.title||point.address}</b><small>{point.address}</small></span></button>)}</div>}
+   {focused&&!query.trim()&&!near&&recent.length===0&&<small className="address-hint">Type to search addresses, choose a recent location, or search near you.</small>}
   </div>
+  {coordinates&&<div className="address-confirmation">
+   {verification&&<p className="address-hint"><strong>Provider-formatted location:</strong> {verification.address}</p>}
+   {verification?.resultType&&<small className="address-hint">Provider result type: {verification.resultType}</small>}
+   {verification?.providerHouseNumber&&verification.customerHouseNumber&&verification.providerHouseNumber.toLowerCase()!==verification.customerHouseNumber.toLowerCase()&&<p className="address-error" role="alert">You entered {verification.customerHouseNumber}, but the provider returned {verification.providerHouseNumber}. Check the final address and pin before confirming; neither number is silently substituted.</p>}
+   <p className={verification?.precision==="building"?"address-hint":"address-error"}>{verification?.precision==="building"&&verification.providerHouseNumber
+    ?`Provider returned a building-level result (${verification.providerHouseNumber}).`
+    :verification?.precision==="street"
+     ?"Street-level result only. The building number could not be independently verified."
+     :verification?.precision
+      ?"The provider returned a place-level result; exact building precision is unavailable."
+      :"This location was copied from an existing order; verify the address and pin before booking again."}</p>
+   {verification?.originalInput&&<small className="address-hint">Your search: {verification.originalInput}</small>}
+   <label>House/building number<input value={verification?.customerHouseNumber||houseNumberFromInput(value)} maxLength="40" onChange={event=>changeHouseNumber(event.target.value)} placeholder="Enter the number you know"/></label>
+   <label>Confirm the final {label.toLowerCase()}<textarea required maxLength="500" value={confirmedAddress||value} onChange={event=>publishConfirmedAddress(event.target.value)} placeholder="Edit the complete address for the rider"/></label>
+   <label>Landmark or delivery instructions (optional)<textarea maxLength="300" value={instructions} onChange={event=>{setInstructions(event.target.value);publishConfirmedAddress(confirmedAddress||value,event.target.value)}} placeholder="Nearby shop, gate colour, compound details, or directions"/></label>
+   <label className="address-confirm-check"><input type="checkbox" required checked={addressConfirmed} onChange={event=>setAddressConfirmed(event.target.checked)}/> I confirm this complete address and the selected map pin.</label>
+  </div>}
   {mapOpen&&<LocationPicker initialCoordinates={coordinates} onClose={()=>setMapOpen(false)} onSelect={choose}/>}
  </>;
 }
@@ -357,7 +430,7 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
 
  return <div className="modal map-modal" onClick={event=>{if(!loading&&event.target===event.currentTarget)onClose()}}>
   <section className="map-card osm-map-card" onClick={event=>event.stopPropagation()}>
-   <div className="map-heading"><div><b>Choose a location</b><small>Search for an address or click and move the pin to the exact point.</small></div><button className="close" onClick={onClose} aria-label="Close map" disabled={loading}><X/></button></div>
+   <div className="map-heading"><div><b>Choose a location</b><small>Search for a mapped place, then move the pin to the actual pickup or drop-off point. The provider may not verify the building.</small></div><button className="close" onClick={onClose} aria-label="Close map" disabled={loading}><X/></button></div>
    <div className="osm-map-search"><div className="search"><input aria-label="Search map addresses" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search streets, places or landmarks" disabled={loading}/><button type="button" className="secondary" onClick={useCurrentLocation} disabled={loading}><LocateFixed size={16}/> My location</button></div>   {searching&&<small className="address-hint">Searching OpenStreetMap…</small>}{query.trim().length>=3&&!searching&&!error&&results.length===0&&<small className="address-hint">No matching addresses found.</small>}{results.length>0&&<div className="address-suggestions osm-map-results" role="listbox" aria-label="Map search results">{results.map(point=><button key={`${point.lat}-${point.lng}`} type="button" role="option" disabled={loading} onClick={()=>placeMarker(point,point.address)}><MapPin size={15}/><span><b>{point.title}</b><small>{point.address}</small></span></button>)}</div>}</div>
    <div className="osm-map-canvas" ref={container} aria-label="Interactive OpenStreetMap location map" style={loading?{pointerEvents:"none"}:undefined}/>
    {selectedPoint&&<small className="address-hint">Selected coordinates: {selectedPoint.lat.toFixed(6)}, {selectedPoint.lng.toFixed(6)}</small>}
@@ -411,7 +484,12 @@ export function DeliveryLocationMap({order,riderLocation,onClose}){
    <div className="map-heading"><div><b>Delivery locations</b><small>Map uses the verified coordinates saved for this assigned delivery.</small></div><button className="close" onClick={onClose} aria-label="Close map"><X/></button></div>
    {error&&<div className="address-error" role="alert">{error}</div>}
    <div className="osm-map-canvas delivery-map-canvas" ref={container} aria-label="Map showing delivery locations"/>
-   <p className="map-selected-address"><MapPin size={15}/>{order.dropoff_address}</p>
+   <div className="notice delivery-pin-details">
+    <b>Exact customer drop-off pin</b>
+    <p className="map-selected-address"><MapPin size={15}/>{order.dropoff_address}</p>
+    {validPoint(order.dropoff_latitude,order.dropoff_longitude)&&<small>Latitude: {Number(order.dropoff_latitude).toFixed(6)} · Longitude: {Number(order.dropoff_longitude).toFixed(6)}</small>}
+    <small>The map marker and “Navigate to customer” use this saved pin. Confirm the entrance or handoff point with the recipient before completing delivery.</small>
+   </div>
    <div className="map-actions"><button className="secondary" onClick={onClose}>Close</button><NavigationLink label="Navigate to customer" lat={order.dropoff_latitude} lng={order.dropoff_longitude}/></div>
   </section>
  </div>;

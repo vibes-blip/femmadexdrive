@@ -3,6 +3,7 @@ import {reverseGeocode} from "./_geocoding.mjs";
 import {calculatePriceForDeliverySpeed,calculateSuggestedPrice,resolvePackageSelection} from "./_package-selection.mjs";
 
 const ORS_DIRECTIONS_URL="https://api.openrouteservice.org/v2/directions/driving-car/geojson";
+const DISPATCH_TERMS_VERSION="dispatch-terms-2026-10-12";
 const coordinate=(point,key,min,max)=>{
  const value=point?.[key];
  if(value===null||value===undefined||value==="")return null;
@@ -22,6 +23,9 @@ export default async req=>{
   if(!request||typeof request!=="object"||Array.isArray(request))throw new HttpError("Invalid delivery quote request.",400);
   const deliverySpeed=request.deliverySpeed===undefined?"standard":request.deliverySpeed;
   if(!["standard","fast"].includes(deliverySpeed))throw new HttpError("Select a valid delivery speed.",400);
+  if(request.termsAccepted!==true||request.termsVersion!==DISPATCH_TERMS_VERSION){
+   throw new HttpError("Review and accept the current dispatch terms before requesting a quote.",400);
+  }
   const db=sb();
   const {data:profile,error:profileError}=await db.from("profiles").select("role").eq("id",user.id).maybeSingle();
   if(profileError){
@@ -29,12 +33,25 @@ export default async req=>{
    throw new HttpError("Your account could not be verified. Please try again.",503);
   }
   if(profile?.role!=="customer")throw new HttpError("A customer account is required to request a delivery quote.",403);
+  const {data:termsAcceptance,error:termsError}=await db.from("delivery_terms_acceptances").insert({
+   customer_id:user.id,
+   terms_version:DISPATCH_TERMS_VERSION
+  }).select("id").single();
+  if(termsError){
+   console.error("Could not record dispatch terms acceptance",{code:termsError.code,message:termsError.message});
+   throw new HttpError("The dispatch terms record is not ready. Please contact FemmaDexDrive support before retrying.",503);
+  }
   const pickupLatitude=coordinate(request.pickupCoordinates,"lat",-90,90);
   const pickupLongitude=coordinate(request.pickupCoordinates,"lng",-180,180);
   const dropoffLatitude=coordinate(request.dropoffCoordinates,"lat",-90,90);
   const dropoffLongitude=coordinate(request.dropoffCoordinates,"lng",-180,180);
   if([pickupLatitude,pickupLongitude,dropoffLatitude,dropoffLongitude].some(value=>value===null)){
    throw new HttpError("Please select valid pickup and delivery locations again.",400);
+  }
+  const pickupAddress=typeof request.pickupAddress==="string"?request.pickupAddress.trim():"";
+  const dropoffAddress=typeof request.dropoffAddress==="string"?request.dropoffAddress.trim():"";
+  if(!pickupAddress||pickupAddress.length>1000||!dropoffAddress||dropoffAddress.length>1000){
+   throw new HttpError("Confirm pickup and delivery addresses under 1000 characters each.",400);
   }
 
   const description=String(request.description||"").trim().slice(0,2000);
@@ -111,10 +128,10 @@ export default async req=>{
   const suggestedPrice=calculatePriceForDeliverySpeed(standardSuggestedPrice,deliverySpeed);
   const {data:order,error}=await db.rpc("create_delivery_quote_with_options",{
    p_customer_id:user.id,
-   p_pickup_address:pickup.address,
+   p_pickup_address:pickupAddress,
    p_pickup_latitude:pickupLatitude,
    p_pickup_longitude:pickupLongitude,
-   p_dropoff_address:dropoff.address,
+   p_dropoff_address:dropoffAddress,
    p_dropoff_latitude:dropoffLatitude,
    p_dropoff_longitude:dropoffLongitude,
    p_recipient_name:recipientName,
@@ -143,6 +160,14 @@ export default async req=>{
   if(!order?.id){
    console.error("Delivery quote RPC returned no persisted order ID");
    throw new HttpError("Could not confirm that the delivery quote was saved. Please contact support before retrying.",502);
+  }
+  const {error:linkError}=await db.from("delivery_terms_acceptances")
+   .update({order_id:order.id})
+   .eq("id",termsAcceptance.id)
+   .eq("customer_id",user.id);
+  if(linkError){
+   console.error("Quote was saved but terms acceptance could not be linked",{orderId:order.id,code:linkError.code,message:linkError.message});
+   throw new HttpError(`Quote ${order.tracking_number} was saved, but its terms record could not be linked. Contact support before requesting another quote.`,503);
   }
   return json({
    order,

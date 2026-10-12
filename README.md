@@ -7,12 +7,25 @@ This is the upgraded version of the supplied FemmaDexDrive project. It is split 
 - `backend/supabase/migrations/001_femmadexdrive_v2.sql` — database schema, RLS, delivery state machine, rider approval, storage bucket and realtime setup.
 - `netlify.toml` — builds and deploys the Netlify frontend.
 
+## Booking, terms and customer care additions
+
+- The mobile booking entry point is `https://femmadexdrive.netlify.app/book`. It opens the existing authenticated dashboard and preserves named pickup/drop-off selection, dispatch type, server-calculated quote, Operations approval and Paystack checkout.
+- Customers must accept the versioned dispatch terms before asking for a quote. The backend records acceptance in `delivery_terms_acceptances`; apply migrations `019_dispatch_terms_acceptance.sql`, `020_customer_care.sql`, `021_dispatch_exceptions.sql` and `022_support_escalation.sql` in order before deploying these app/backend changes.
+- The terms page is a draft operational policy, not legal advice. Obtain review from a qualified lawyer in the applicable jurisdiction before relying on its redelivery or unclaimed-goods language.
+- iPhone Siri Shortcut instructions are on the customer information panel at `/book#siri-shortcut-setup`. The shortcut opens the mobile website; it is not a native Siri integration.
+- The homepage has separate `Book a Delivery` and `Talk to AI` actions. The AI supports text plus opt-in browser speech recognition/synthesis where available, can guide booking details, and hands off to the existing authenticated booking form for the customer to review. It cannot create orders, submit payment or report a payment as successful. Gemini can be used through its OpenAI-compatible endpoint: set `CARE_AI_API_URL=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, `CARE_AI_API_KEY` to a newly generated Gemini API key, and `CARE_AI_MODEL` to a model enabled for your account in Render. Keep the key server-side; never put it in frontend `VITE_` variables or source control. Revoke any key previously pasted into chat, source control or another public place.
+- FemmaDexCare requests are persisted in `support_conversations` and `support_messages`. A customer can ask for human help; approved, available customer-care staff or admins can preview and manually accept waiting requests. Human replies are distinguished from AI replies. Render checks for requests without a human response after one minute and sends an admin attention email using the existing `RESEND_API_KEY` and `ADMIN_EMAIL` settings. This requires migration `022_support_escalation.sql`; it has not been applied automatically.
+- The customer-care inbox uses authenticated Supabase access and participant/role-based row-level security. Customers can access their own conversations only; available, approved care accounts can see waiting human requests, and admins can handle support requests. Rider-customer delivery chats remain separate.
+- If a sender is absent at pickup, the rider exception RPC cancels the dispatch while leaving its payment record unchanged; the customer can reuse the retained order details to make a new quote. If the recipient is absent after pickup, the rider reports the incident and Operations records custody/return to sender. Operations must confirm that the customer was notified before the three-working-day collection deadline starts. After that deadline an administrator may mark the goods unclaimed, but the system does not automatically dispose of goods.
+- A requested redelivery creates a separate, approved quote for 45% of the original price and uses the existing Paystack initiation, verification and webhook workflow; it is never treated as paid before Paystack confirms it.
+
 ## What was upgraded
 
 ### Customer
 
 - Signup/login through Supabase Auth.
-- OpenStreetMap address search and reverse geocoding through Nominatim, with MapLibre GL JS interactive maps.
+- Photon address autocomplete over OpenStreetMap data and Nominatim reverse geocoding (Photon fallback), with MapLibre GL JS interactive maps. The existing partial-query suggestions remain in place; this repository does not use the Mapbox geocoder.
+- The address picker preserves customer-entered house numbers when a provider returns only a street, distinguishes provider-reported building numbers from street-level results, and requires customers to edit/confirm the final address and pin. Optional landmarks/instructions and the provider precision note are saved in the existing pickup/drop-off address text; the separate numeric coordinates remain the only coordinates sent to OpenRouteService. No database migration is needed for these address additions.
 - Server-side OpenRouteService driving distance and ETA from the selected coordinates.
 
 - Weight entry for large and very large parcels, plus package dimensions.
@@ -92,7 +105,7 @@ See `SECURITY.md`. The application uses server-side secrets, Supabase RLS, priva
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Open SQL Editor and run migrations `001_femmadexdrive_v2.sql` through `015_package_categories_without_measurements.sql` in order. Migration 006 is safe to apply when chat/call tables already exist. Apply migrations 014 and 015 before deploying the matching frontend.
+2. Open SQL Editor and run the numbered migrations in order: `001`–`015`, then `018`–`022`. Migration 006 is safe to apply when chat/call tables already exist. Migration 022 adds persistent human-support requests and escalation; apply it only after the existing support schema from migration 020.
 
 3. Create/confirm your Auth settings.
 4. Create your first admin account through Supabase Auth.
@@ -206,7 +219,7 @@ Use `femmadexdrive.netlify.app`. Set base directory `frontend`, build command `n
 
 ### Render API
 
-Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `ORS_API_KEY` for OpenRouteService road routing. Set `APP_ORIGIN=https://femmadexdrive.netlify.app`. The Paystack return callback is generated using Render's `RENDER_EXTERNAL_URL`; do not configure a Netlify callback URL. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. After approval, apply Supabase migrations 001–015 in order before deploying the updated quote API and customer UI; run both dispatch and package-category SQL contract tests before rollout.
+Create a Render Web Service from this repository with root directory `backend`, build command `npm install`, start command `npm start`, and Node 20 or newer. Set server variables in Render, including `ORS_API_KEY` for OpenRouteService road routing. Set `APP_ORIGIN=https://femmadexdrive.netlify.app`. The Paystack return callback is generated using Render's `RENDER_EXTERNAL_URL`; do not configure a Netlify callback URL. Configure the Paystack webhook URL as `https://femmadexdrive.onrender.com/api/paystack-webhook`. After approval, apply the numbered Supabase migrations 001–015 and 018–022 in order before deploying the updated API and frontend. Customer-care email notifications reuse the existing `RESEND_API_KEY` and `ADMIN_EMAIL`; AI voice/chat uses the already configured `CARE_AI_API_*` server variables. No new secrets or frontend environment variables are required.
 
 
 The API exposes `/health` and endpoints under `/api/`. Automatic delivery completion runs at startup and once per minute in the Render process. Locally, run `npm run dev` from `frontend/` and `npm start` from `backend/`; without `VITE_API_BASE_URL`, Vite proxies `/api` to the local backend at `127.0.0.1:10000` (override with `API_PROXY_TARGET` if needed). Frontend-only browser variables belong in `frontend/.env`, while server-only variables belong in `backend/.env`.

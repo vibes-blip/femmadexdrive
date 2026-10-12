@@ -13,8 +13,8 @@ const compatible=(rider,order)=>{
 const stamp=value=>value?new Date(value).toLocaleString():"";
 
 export default function AdminDispatchControls({supabase,session,profile,orders,riders,selected,toast,refresh,notifyAdmin}){
- const [alerts,setAlerts]=useState([]),[offers,setOffers]=useState([]),[events,setEvents]=useState([]),[history,setHistory]=useState([]),[riderAudit,setRiderAudit]=useState([]),[contacts,setContacts]=useState(null);
- const [manualRider,setManualRider]=useState(""),[reason,setReason]=useState(""),[cancelReason,setCancelReason]=useState(""),[handover,setHandover]=useState(""),[handoverConfirmed,setHandoverConfirmed]=useState(false),[busy,setBusy]=useState(false);
+ const [alerts,setAlerts]=useState([]),[offers,setOffers]=useState([]),[events,setEvents]=useState([]),[history,setHistory]=useState([]),[riderAudit,setRiderAudit]=useState([]),[returns,setReturns]=useState([]),[contacts,setContacts]=useState(null);
+ const [manualRider,setManualRider]=useState(""),[reason,setReason]=useState(""),[cancelReason,setCancelReason]=useState(""),[handover,setHandover]=useState(""),[handoverConfirmed,setHandoverConfirmed]=useState(false),[customerNotified,setCustomerNotified]=useState(false),[busy,setBusy]=useState(false);
  const notifiedAlerts=useRef(new Set());
  const authorised=["admin","supervisor"].includes(profile?.role);
  const activeRiders=useMemo(()=>new Set(orders.filter(order=>order.rider_id&&!terminal.has(order.status)).map(order=>order.rider_id)),[orders]);
@@ -38,18 +38,19 @@ export default function AdminDispatchControls({supabase,session,profile,orders,r
   if(!authorised||!supabase)return;
   const {error:refreshError}=await supabase.rpc("refresh_admin_dispatch_queue");
   if(refreshError){toast(`Could not refresh rider dispatch queue: ${refreshError.message}`);return}
-  const [alertResult,offerResult,eventResult,historyResult,riderAuditResult]=await Promise.all([
+  const [alertResult,offerResult,eventResult,historyResult,riderAuditResult,returnResult]=await Promise.all([
    supabase.from("dispatch_alerts").select("*").is("resolved_at",null).is("acknowledged_at",null).order("created_at",{ascending:false}).limit(100),
    supabase.from("rider_offers").select("*").order("offered_at",{ascending:false}).limit(300),
    supabase.from("order_events").select("id,order_id,actor_id,event,note,created_at").order("created_at",{ascending:false}).limit(100),
    supabase.from("order_assignment_history").select("*").order("created_at",{ascending:false}).limit(100),
-   supabase.from("rider_admin_events").select("*").order("created_at",{ascending:false}).limit(100)
+   supabase.from("rider_admin_events").select("*").order("created_at",{ascending:false}).limit(100),
+   supabase.from("dispatch_returns").select("*").order("created_at",{ascending:false}).limit(100)
   ]);
-  for(const [label,result] of [["dispatch alerts",alertResult],["rider offers",offerResult],["delivery activity",eventResult],["assignment history",historyResult],["rider approval history",riderAuditResult]]){
+  for(const [label,result] of [["dispatch alerts",alertResult],["rider offers",offerResult],["delivery activity",eventResult],["assignment history",historyResult],["rider approval history",riderAuditResult],["returned-goods records",returnResult]]){
    if(result.error){toast(`Could not load ${label}: ${result.error.message}`);return}
   }
   const newAlerts=alertResult.data||[];
-  setAlerts(newAlerts);setOffers(offerResult.data||[]);setEvents(eventResult.data||[]);setHistory(historyResult.data||[]);setRiderAudit(riderAuditResult.data||[]);
+  setAlerts(newAlerts);setOffers(offerResult.data||[]);setEvents(eventResult.data||[]);setHistory(historyResult.data||[]);setRiderAudit(riderAuditResult.data||[]);setReturns(returnResult.data||[]);
   for(const alert of newAlerts)if(!notifiedAlerts.current.has(alert.id)){
    notifiedAlerts.current.add(alert.id);
    notifyAdmin(alert.id).catch(error=>toast(`Live dispatch alert is available, but admin email notification failed: ${error.message}`));
@@ -67,6 +68,7 @@ export default function AdminDispatchControls({supabase,session,profile,orders,r
    .on("postgres_changes",{event:"INSERT",schema:"public",table:"order_events"},load)
    .on("postgres_changes",{event:"INSERT",schema:"public",table:"order_assignment_history"},load)
    .on("postgres_changes",{event:"INSERT",schema:"public",table:"rider_admin_events"},load)
+   .on("postgres_changes",{event:"*",schema:"public",table:"dispatch_returns"},load)
    .subscribe(status=>{if(status==="CHANNEL_ERROR")toast("Live dispatch alerts are unavailable. The refresh button remains available.")});
   const timer=setInterval(load,15000);
   return()=>{clearInterval(timer);supabase.removeChannel(channel)};
@@ -82,6 +84,8 @@ export default function AdminDispatchControls({supabase,session,profile,orders,r
   });
   return()=>{active=false;setContacts(null)};
  },[authorised,selected?.id,session?.user?.id]);
+
+ useEffect(()=>{setCustomerNotified(false)},[selected?.id]);
 
  useEffect(()=>{
   if(eligibleRiders.some(rider=>rider.id===manualRider))return;
@@ -104,6 +108,16 @@ export default function AdminDispatchControls({supabase,session,profile,orders,r
  const assign=()=>run("admin_assign_order",{p_order_id:selected.id,p_rider_id:manualRider,p_reason:reason},"Rider assigned and delivery history recorded.");
  const release=()=>run("return_order_to_rider_pool",{p_order_id:selected.id,p_reason:reason,p_handover_confirmed:handoverConfirmed,p_handover_details:handover||null},"Delivery returned to rider matching and compatible riders notified.");
  const cancel=()=>{if(window.confirm(`Cancel ${selected.tracking_number}? The payment status will not be changed.`))run("admin_cancel_order",{p_order_id:selected.id,p_reason:cancelReason,p_handover_confirmed:handoverConfirmed,p_handover_details:handover||null},"Delivery cancelled and the action recorded.");};
+ const recordGoodsReturn=()=>run("admin_record_goods_return",{p_order_id:selected.id,p_reason:reason,p_handover_details:handover||null},"Returned goods recorded. Confirm customer notification after contacting them.");
+ const selectedReturn=returns.find(item=>item.order_id===selected?.id);
+ const recipientReports=events.filter(event=>event.order_id===selected?.id&&event.event==="recipient_unavailable_reported");
+ const latestRecipientReport=recipientReports.sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at))[0];
+ const latestRecipientResolution=events.filter(event=>event.order_id===selected?.id&&event.event==="recipient_unavailability_resolved").sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at))[0];
+ const recipientUnavailable=!!latestRecipientReport&&(!latestRecipientResolution||Date.parse(latestRecipientReport.created_at)>Date.parse(latestRecipientResolution.created_at));
+ const confirmReturnNotice=()=>run("admin_confirm_return_notification",{p_return_id:selectedReturn.id},"Customer notification recorded; the three-working-day collection period has started.");
+ const markReturnCollected=()=>run("admin_mark_return_collected",{p_return_id:selectedReturn.id},"Returned goods marked as collected.");
+ const markReturnUnclaimed=()=>run("admin_mark_return_unclaimed",{p_return_id:selectedReturn.id},"Collection period ended. Further goods handling must follow applicable law and Operations review.");
+ const resolveRecipient=()=>run("admin_resolve_recipient_unavailability",{p_order_id:selected.id,p_note:reason},"Recipient availability confirmed; the rider may continue after refresh.");
  const setRiderStatus=(id,status)=>run("set_rider_approval_status",{p_rider_id:id,p_status:status},`Rider status changed to ${status}.`);
  const resolveAlert=id=>run("acknowledge_dispatch_alert",{p_alert_id:id},"Dispatch alert acknowledged.");
 
@@ -153,7 +167,7 @@ export default function AdminDispatchControls({supabase,session,profile,orders,r
     <button className="primary" disabled={busy||!manualRider||reason.trim().length<3} onClick={assign}>Assign rider</button>
     {!eligibleRiders.length&&<small>No online, approved, compatible, unassigned rider is available.</small>}
    </div>}
-   {selected.rider_id&&["accepted","picked_up","on_the_way","at_door"].includes(selected.status)&&<div className="form">
+   {selected.rider_id&&!recipientUnavailable&&["accepted","picked_up","on_the_way","at_door"].includes(selected.status)&&<div className="form">
     <label>Reassignment reason<input maxLength="1000" value={reason} onChange={event=>setReason(event.target.value)} required/></label>
     {needsHandover&&<>
      <label className="check"><input type="checkbox" checked={handoverConfirmed} onChange={event=>setHandoverConfirmed(event.target.checked)}/> I confirmed package custody and recovery/handover arrangements with the rider/customer.</label>
@@ -162,14 +176,31 @@ export default function AdminDispatchControls({supabase,session,profile,orders,r
     <button className="secondary" disabled={busy||reason.trim().length<3||(needsHandover&&(!handoverConfirmed||handover.trim().length<5))} onClick={release}>Safely remove assignment and return to pool</button>
     {needsHandover&&<small><AlertTriangle size={14}/> Reassignment stays blocked until custody and recovery details are confirmed.</small>}
    </div>}
-   {!terminal.has(selected.status)&&selected.status!=="delivered"&&<div className="form">
+   {recipientUnavailable&&!selectedReturn&&selected.rider_id&&["picked_up","on_the_way","at_door"].includes(selected.status)&&<div className="form return-control">
+    <h4>Recipient unavailable · return goods to sender</h4>
+    <label>Operations resolution / return reason<input maxLength="1000" value={reason} onChange={event=>setReason(event.target.value)} placeholder="Confirm the recipient is available or record why goods are being returned"/></label>
+    <div className="actions"><button className="secondary" disabled={busy||reason.trim().length<3} onClick={resolveRecipient}>Recipient is now available</button></div>
+    <label className="check"><input type="checkbox" checked={handoverConfirmed} onChange={event=>setHandoverConfirmed(event.target.checked)}/> I confirmed package custody and return to sender.</label>
+    <label>Return / handover details<textarea maxLength="2000" value={handover} onChange={event=>setHandover(event.target.value)} placeholder="Where and with whom the goods were left"/></label>
+    <button className="primary" disabled={busy||reason.trim().length<3||!handoverConfirmed||handover.trim().length<5} onClick={recordGoodsReturn}>Record goods returned to sender</button>
+    <small>This cancels the original delivery without changing its payment. After customer notification, goods are held for three working days. Redelivery is 45% of the original dispatch price in total.</small>
+   </div>}
+   {selectedReturn&&<div className="form return-control">
+    <h4>Returned-goods custody record · {selectedReturn.status.replaceAll("_"," ")}</h4>
+    <p>Original dispatch: {money(selectedReturn.original_price)} · Redelivery total: {money(selectedReturn.redelivery_fee)}.</p>
+    {!selectedReturn.customer_notified_at&&selectedReturn.status==="awaiting_collection"&&<><label className="check"><input type="checkbox" checked={customerNotified} onChange={event=>setCustomerNotified(event.target.checked)}/> I have actually notified the customer that the goods are ready for collection.</label><button className="secondary" disabled={busy||!customerNotified} onClick={confirmReturnNotice}>Record customer notification and start 3 working days</button></>}
+    {selectedReturn.customer_notified_at&&<p>Customer notified: {stamp(selectedReturn.customer_notified_at)} · Collect by: {stamp(selectedReturn.collection_deadline_at)}</p>}
+    {selectedReturn.status==="awaiting_collection"&&<div className="actions"><button className="secondary" disabled={busy} onClick={markReturnCollected}>Mark collected</button>{selectedReturn.collection_deadline_at&&Date.parse(selectedReturn.collection_deadline_at)<=Date.now()&&<button className="secondary" disabled={busy} onClick={markReturnUnclaimed}>Mark collection period ended</button>}</div>}
+    {selectedReturn.status==="unclaimed"&&<small>Do not discard or transfer goods automatically. Follow applicable law and record the Operations decision.</small>}
+   </div>}
+   {!terminal.has(selected.status)&&selected.status!=="delivered"&&!recipientUnavailable&&<div className="form">
     <label>Cancellation reason<input maxLength="1000" value={cancelReason} onChange={event=>setCancelReason(event.target.value)} required/></label>
     <button className="secondary" disabled={busy||cancelReason.trim().length<3||(needsHandover&&(!handoverConfirmed||handover.trim().length<5))} onClick={cancel}>Cancel delivery with audit reason</button>
    </div>}
   </div>}
 
   <h3>Recent rider responses and delivery problems</h3>
-  <div className="dispatch-event-list">{events.filter(event=>["rider_declined","rider_offer_timed_out","rider_problem_reported","pickup_deadline_missed","admin_returned_to_pool","admin_assigned_rider","admin_cancelled"].includes(event.event)).slice(0,20).map(event=><article className="dispatch-event" key={event.id}>
+  <div className="dispatch-event-list">{events.filter(event=>["rider_declined","rider_offer_timed_out","rider_problem_reported","pickup_deadline_missed","admin_returned_to_pool","admin_assigned_rider","admin_cancelled","sender_unavailable_at_pickup","recipient_unavailable_reported","customer_notified_goods_ready","returned_goods_collected","returned_goods_unclaimed","redelivery_quote_created"].includes(event.event)).slice(0,20).map(event=><article className="dispatch-event" key={event.id}>
    <div><b>{orderName(event.order_id)} · {event.event.replaceAll("_"," ")}</b><span>{riderName(event.actor_id)?`${riderName(event.actor_id)} · `:""}{event.note||"No reason supplied."}</span></div>
    <small>{stamp(event.created_at)}</small>
   </article>)}</div>
