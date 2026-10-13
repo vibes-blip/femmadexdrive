@@ -255,8 +255,8 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
  const startNewConversation=()=>{setConversationId(null);setConversationStatus("waiting");setMessages([]);setNotice("");setError("")};
 
  return <div className="care-widget">
-  <button className="care-launcher" aria-label={open?"Close FemmaDexCare":"Open FemmaDexCare"} onClick={()=>setOpen(value=>!value)}>
-   {open?<X size={21}/>:<MessageCircle size={21}/>}<span className="care-call-particles" aria-hidden="true"><i/><i/><i/></span><span>FemmaDexCare</span>
+  <button className="care-launcher" aria-label={open?"Close FemmaDexCare":"Open FemmaDexCare"} aria-expanded={open} title={open?"Close FemmaDexCare":"Open FemmaDexCare"} onClick={()=>setOpen(value=>!value)}>
+   {open?<X size={21}/>:<MessageCircle size={21}/>}
   </button>
   {open&&<section className="care-panel" aria-label="FemmaDexCare chat">
    <div className="care-panel-head"><div><span className="eyebrow">FEMMADEXCARE</span><b>Customer support</b><small>Automated help or an available human agent</small></div><button className="care-close" onClick={()=>setOpen(false)} aria-label="Close chat"><X size={18}/></button></div>
