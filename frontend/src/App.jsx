@@ -494,7 +494,8 @@ function Admin({session,profile,open,toast}){
     <span><small>Road distance / ETA</small><b>{selected.distance_km||"—"} km · {selected.duration_minutes||"—"} min</b><small>{selected.distance_meters??reviewDetails?.distance_meters??"—"} m · {selected.duration_seconds??reviewDetails?.duration_seconds??"—"} sec</small></span>
     <span><small>Vehicle</small><b>{selected.vehicle_type}</b></span>
     <span><small>System suggested price</small><b>{reviewDetails?money(reviewDetails.suggested_price):selected.status==="price_review"?money(selected.system_price):"—"}</b></span>
-    <span><small>Approved price</small><b>{reviewDetails?.approved_price?money(reviewDetails.approved_price):selected.status==="awaiting_payment"||selected.status==="approved"?money(selected.final_price):"Not approved"}</b></span>
+    <span><small>Approved price</small><b>{reviewDetails?.status==="approved"&&reviewDetails.approved_price?money(reviewDetails.approved_price):"Not approved"}</b></span>
+    <span><small>Quote review</small><b>{reviewDetails?.status?.replaceAll("_"," ")||"Review record unavailable"}</b></span>
     <span><small>Payment</small><b>{selected.payment_status}</b></span>
     <span><small>Status</small><b>{statusLabels[selected.status]||selected.status}</b></span>
    </div>

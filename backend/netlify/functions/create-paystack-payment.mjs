@@ -67,12 +67,23 @@ export default async req=>{
           p_order_id:o.id,
           p_customer_id:user.id
         });
-        if(prepareError)throw new HttpError("Could not verify the approved delivery for payment. Refresh and try again.",409);
-        if(prepared!==true)throw new HttpError("This approved delivery quote could not be verified for payment. Contact operations before retrying.",409);
+        if(prepareError){
+          console.error("Could not reconcile approved quote before checkout",{code:prepareError.code,message:prepareError.message});
+          throw new HttpError("Could not verify the approved delivery for payment. Refresh and try again.",409);
+        }
+        if(prepared!==true){
+          console.warn("Approved quote could not be reconciled for checkout",{orderId:o.id,quoteStatus:quote.status,orderStatus:o.status,paymentStatus:o.payment_status});
+          throw new HttpError("This approved delivery quote could not be verified for payment. Contact operations before retrying.",409);
+        }
         orderStatus="approved";
       }
-      if(quote.status!=="approved"||orderStatus!=="approved"||o.payment_status!=="unpaid") {
-        throw new Error("Operations has not approved this delivery quote for payment");
+      if(quote.status!=="approved"){
+        console.warn("Delivery checkout blocked because the quote has not been approved",{orderId:o.id,quoteStatus:quote.status,orderStatus:o.status,paymentStatus:o.payment_status});
+        throw new HttpError(`This delivery quote is ${String(quote.status||"unreviewed").replaceAll("_"," ")}. Operations must approve it before payment.`,409);
+      }
+      if(orderStatus!=="approved"||o.payment_status!=="unpaid") {
+        console.warn("Delivery checkout blocked by an incompatible order state",{orderId:o.id,quoteStatus:quote.status,orderStatus:o.status,paymentStatus:o.payment_status});
+        throw new HttpError("This approved quote is not ready for payment. Refresh the delivery or ask operations to review its status.",409);
       }
       if(!quote.approved_price||Number(quote.approved_price)<=0||Number(quote.approved_price)!==Number(o.final_price)) {
         throw new Error("The approved delivery price is invalid. Contact operations.");
