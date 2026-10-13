@@ -19,17 +19,6 @@ const OSM_STYLE={
  layers:[{id:"openstreetmap-raster",type:"raster",source:"openstreetmap"}]
 };
 const validPoint=(lat,lng)=>lat!==null&&lat!==undefined&&lat!==""&&lng!==null&&lng!==undefined&&lng!==""&&Number.isFinite(Number(lat))&&Number(lat)>=-90&&Number(lat)<=90&&Number.isFinite(Number(lng))&&Number(lng)>=-180&&Number(lng)<=180;
-const addressForOrder=(address,verification,instructions)=>{
- const numberMismatch=verification?.providerHouseNumber&&verification.customerHouseNumber&&verification.providerHouseNumber.toLowerCase()!==verification.customerHouseNumber.toLowerCase();
- const precision=verification?.precision==="building"&&verification.providerHouseNumber
-  ?`Location precision: provider result includes house number ${verification.providerHouseNumber}; confirm the correct entrance.${numberMismatch?` Customer-entered number ${verification.customerHouseNumber} differs and needs manual verification.`:""}`
-  :verification?.precision==="street"
-   ?"Location precision: provider result is street-level; the building number was not independently verified."
-   :verification
-    ?"Location precision: provider returned a place-level result; exact building precision is unavailable."
-    :"";
- return [String(address||"").trim(),precision,String(instructions||"").trim()?`Delivery instructions: ${String(instructions).trim()}`:""].filter(Boolean).join("\n");
-};
 export function locationUnavailableMessage(){
  if(typeof window!=="undefined"&&!window.isSecureContext)return "Browser location requires a secure HTTPS connection. Enter an address or choose a location on the map instead.";
  if(typeof navigator==="undefined"||!navigator.geolocation)return "Location is not available in this browser. Enter an address or choose a location on the map instead.";
@@ -85,9 +74,7 @@ export function Address({label,value,onChange,onSelect,coordinates}){
  const [results,setResults]=useState([]);
  const [recent,setRecent]=useRecentLocations();
  const [query,setQuery]=useState(value||"");
- const [verification,setVerification]=useState(null);
  const [confirmedAddress,setConfirmedAddress]=useState("");
- const [instructions,setInstructions]=useState("");
  const [near,setNear]=useState(null);
  const [searching,setSearching]=useState(false);
  const [nearbyBusy,setNearbyBusy]=useState(false);
@@ -156,10 +143,8 @@ export function Address({label,value,onChange,onSelect,coordinates}){
     ?providerAddress
     :addressWithHouseNumber(providerAddress,customerHouseNumber,providerHouseNumber);
    const addressVerification={address:providerAddress,precision,provider:point.provider||reversed.provider,resultType:point.resultType||reversed.resultType,providerHouseNumber,customerHouseNumber,originalInput};
-   setVerification(addressVerification);
    setConfirmedAddress(address);
-   setInstructions("");
-   onSelect(addressForOrder(address,addressVerification),{lat:selected.lat,lng:selected.lng},addressVerification);
+   onSelect(address,{lat:selected.lat,lng:selected.lng});
    setRecent(current=>{
     const next=[{...selected,customerHouseNumber},...current.filter(item=>item.address!==selected.address||item.customerHouseNumber!==customerHouseNumber)].slice(0,6);
     try{localStorage.setItem("fdd-recent-locations",JSON.stringify(next))}catch{}
@@ -189,25 +174,13 @@ export function Address({label,value,onChange,onSelect,coordinates}){
   selectionBusy.current=false;
   setSelecting(false);
   setQuery(nextValue);
-  setVerification(null);
   setConfirmedAddress("");
-  setInstructions("");
   onChange(nextValue);
  };
 
- const publishAddress=(nextAddress,nextInstructions=instructions)=>{
-  const completeAddress=addressForOrder(nextAddress,verification,nextInstructions);
+ const editSelectedAddress=nextAddress=>{
   setConfirmedAddress(nextAddress);
-  onSelect(completeAddress,{lat:Number(coordinates.lat),lng:Number(coordinates.lng)},verification);
-  setAddressConfirmed(false);
- };
-
- const changeHouseNumber=nextValue=>{
-  if(!coordinates)return;
-  const base=verification?.address||confirmedAddress||value;
-  const nextAddress=addressWithHouseNumber(base,nextValue,verification?.providerHouseNumber);
-  setVerification(current=>({...current,address:current?.address||base,customerHouseNumber:nextValue}));
-  publishAddress(nextAddress);
+  onSelect(nextAddress,{lat:Number(coordinates.lat),lng:Number(coordinates.lng)});
  };
 
  const searchNearby=()=>{
@@ -256,10 +229,7 @@ export function Address({label,value,onChange,onSelect,coordinates}){
    {focused&&!query.trim()&&!near&&recent.length===0&&<small className="address-hint">Type to search addresses, choose a recent location, or search near you.</small>}
   </div>
   {coordinates&&<div className="address-details">
-   <p className="address-hint"><strong>Selected address:</strong> {confirmedAddress||value}</p>
-   {verification?.providerHouseNumber&&verification.customerHouseNumber&&verification.providerHouseNumber.toLowerCase()!==verification.customerHouseNumber.toLowerCase()&&<p className="address-hint">The search result shows {verification.providerHouseNumber}; your entered number {verification.customerHouseNumber} will be used.</p>}
-   <label>House/building number<input value={verification?.customerHouseNumber??houseNumberFromInput(value)} maxLength="40" onChange={event=>changeHouseNumber(event.target.value)} placeholder="Enter the number you know"/></label>
-   <label>Landmark or delivery instructions (optional)<textarea maxLength="300" value={instructions} onChange={event=>{setInstructions(event.target.value);publishAddress(confirmedAddress||value,event.target.value)}} placeholder="Nearby shop, gate colour, compound details, or directions"/></label>
+   <label>{label}<input value={confirmedAddress||value} maxLength="1000" onChange={event=>editSelectedAddress(event.target.value)} placeholder="Enter the full address, including building number"/></label>
   </div>}
   {mapOpen&&<LocationPicker initialCoordinates={coordinates} onClose={()=>setMapOpen(false)} onSelect={choose}/>}
  </>;

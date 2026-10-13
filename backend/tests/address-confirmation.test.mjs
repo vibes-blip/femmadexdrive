@@ -63,17 +63,22 @@ test("provider house number and street precision are reported only when present 
  assert.equal(addressWithHouseNumber("43 Awoseyin Street, Lagos","45","43"),"45, Awoseyin Street, Lagos");
 });
 
-test("selected address and building number persist separately from numeric route coordinates",()=>{
+test("selected and edited addresses stay concise and preserve route coordinates",()=>{
  assert.match(locationUi,/houseNumberFromInput/);
- assert.match(locationUi,/House\/building number/);
- assert.match(locationUi,/The search result shows .*your entered number .*will be used/);
- assert.match(locationUi,/Delivery instructions:/);
+ assert.match(locationUi,/Enter the full address, including building number/);
+ assert.match(locationUi,/editSelectedAddress/);
+ assert.doesNotMatch(locationUi,/Location precision:/);
+ assert.doesNotMatch(locationUi,/Provider-formatted location/);
+ assert.doesNotMatch(locationUi,/Provider result type/);
+ assert.doesNotMatch(locationUi,/Landmark or delivery instructions/);
  assert.doesNotMatch(locationUi,/I confirm this complete address and the selected map pin/);
  assert.doesNotMatch(locationUi,/This location was copied from an existing order/);
+ assert.doesNotMatch(locationUi,/addressForOrder/);
  assert.match(locationUi,/choose\(\{lat:position\.coords\.latitude,lng:position\.coords\.longitude\}\)/);
  assert.match(locationUi,/handleMarkerDrag/);
- assert.match(bookingUi,/pickupAddress:orderAddress\(form\.pickup,form\.pickupInstructions\)/);
- assert.match(bookingUi,/dropoffAddress:orderAddress\(form\.dropoff,form\.dropoffInstructions\)/);
+ assert.match(bookingUi,/const orderAddress=address=>clean\(address\)/);
+ assert.match(bookingUi,/pickupAddress:orderAddress\(form\.pickup/);
+ assert.match(bookingUi,/dropoffAddress:orderAddress\(form\.dropoff/);
  assert.match(quoteHandler,/p_pickup_address:pickupAddress/);
  assert.match(quoteHandler,/p_dropoff_address:dropoffAddress/);
  assert.match(quoteHandler,/coordinates:\[\[pickupLongitude,pickupLatitude\],\[dropoffLongitude,dropoffLatitude\]\]/);
