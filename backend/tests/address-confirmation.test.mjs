@@ -63,12 +63,14 @@ test("provider house number and street precision are reported only when present 
  assert.equal(addressWithHouseNumber("43 Awoseyin Street, Lagos","45","43"),"45, Awoseyin Street, Lagos");
 });
 
-test("confirmed address and landmark persist separately from numeric route coordinates",()=>{
+test("selected address and building number persist separately from numeric route coordinates",()=>{
  assert.match(locationUi,/houseNumberFromInput/);
- assert.match(locationUi,/Street-level result only\. The building number could not be independently verified\./);
- assert.match(locationUi,/neither number is silently substituted/);
+ assert.match(locationUi,/House\/building number/);
+ assert.match(locationUi,/The search result shows .*your entered number .*will be used/);
  assert.match(locationUi,/Delivery instructions:/);
- assert.match(locationUi,/required checked=\{addressConfirmed\}/);
+ assert.doesNotMatch(locationUi,/I confirm this complete address and the selected map pin/);
+ assert.doesNotMatch(locationUi,/This location was copied from an existing order/);
+ assert.match(locationUi,/choose\(\{lat:position\.coords\.latitude,lng:position\.coords\.longitude\}\)/);
  assert.match(locationUi,/handleMarkerDrag/);
  assert.match(bookingUi,/pickupAddress:orderAddress\(form\.pickup,form\.pickupInstructions\)/);
  assert.match(bookingUi,/dropoffAddress:orderAddress\(form\.dropoff,form\.dropoffInstructions\)/);
@@ -86,6 +88,6 @@ test("existing autocomplete debounce, mobile suggestions, and pin coordinate han
  assert.match(locationUi,/controller\.abort\(\)/);
  assert.match(locationUi,/setSelectedPoint\(\{lat:point\.lat,lng:point\.lng\}\)/);
  assert.match(locationUi,/setLngLat\(\[point\.lng,point\.lat\]\)/);
- assert.match(read("../../frontend/src/styles.css"),/@media\(max-width:520px\)\{\.address-confirmation/);
+ assert.match(read("../../frontend/src/styles.css"),/@media\(max-width:520px\)\{\.address-details/);
  assert.match(read("../../frontend/src/styles.css"),/overflow-wrap:anywhere/);
 });

@@ -80,7 +80,7 @@ function useRecentLocations(){
  });
 }
 
-export function Address({label,value,onChange,onSelect,coordinates,locate,locating}){
+export function Address({label,value,onChange,onSelect,coordinates}){
  const inputId=useId();
  const [results,setResults]=useState([]);
  const [recent,setRecent]=useRecentLocations();
@@ -88,11 +88,11 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
  const [verification,setVerification]=useState(null);
  const [confirmedAddress,setConfirmedAddress]=useState("");
  const [instructions,setInstructions]=useState("");
- const [addressConfirmed,setAddressConfirmed]=useState(false);
  const [near,setNear]=useState(null);
  const [searching,setSearching]=useState(false);
  const [nearbyBusy,setNearbyBusy]=useState(false);
  const [selecting,setSelecting]=useState(false);
+ const [locating,setLocating]=useState(false);
  const [focused,setFocused]=useState(false);
  const [error,setError]=useState("");
  const [mapOpen,setMapOpen]=useState(false);
@@ -159,7 +159,6 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
    setVerification(addressVerification);
    setConfirmedAddress(address);
    setInstructions("");
-   setAddressConfirmed(false);
    onSelect(addressForOrder(address,addressVerification),{lat:selected.lat,lng:selected.lng},addressVerification);
    setRecent(current=>{
     const next=[{...selected,customerHouseNumber},...current.filter(item=>item.address!==selected.address||item.customerHouseNumber!==customerHouseNumber)].slice(0,6);
@@ -193,11 +192,10 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
   setVerification(null);
   setConfirmedAddress("");
   setInstructions("");
-  setAddressConfirmed(false);
   onChange(nextValue);
  };
 
- const publishConfirmedAddress=(nextAddress,nextInstructions=instructions)=>{
+ const publishAddress=(nextAddress,nextInstructions=instructions)=>{
   const completeAddress=addressForOrder(nextAddress,verification,nextInstructions);
   setConfirmedAddress(nextAddress);
   onSelect(completeAddress,{lat:Number(coordinates.lat),lng:Number(coordinates.lng)},verification);
@@ -208,8 +206,8 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
   if(!coordinates)return;
   const base=verification?.address||confirmedAddress||value;
   const nextAddress=addressWithHouseNumber(base,nextValue,verification?.providerHouseNumber);
-  setVerification(current=>current?{...current,customerHouseNumber:nextValue}:current);
-  publishConfirmedAddress(nextAddress);
+  setVerification(current=>({...current,address:current?.address||base,customerHouseNumber:nextValue}));
+  publishAddress(nextAddress);
  };
 
  const searchNearby=()=>{
@@ -226,13 +224,25 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
    setError(geolocationErrorMessage(error,"You can still type an address or choose it on the map."));
   },{enableHighAccuracy:true,timeout:12000});
  };
+ const useCurrentLocation=()=>{
+  const unavailable=locationUnavailableMessage();
+  if(unavailable){setError(unavailable);return}
+  setLocating(true);
+  setError("");
+  navigator.geolocation.getCurrentPosition(position=>{
+   void choose({lat:position.coords.latitude,lng:position.coords.longitude}).finally(()=>setLocating(false));
+  },locationError=>{
+   setLocating(false);
+   setError(geolocationErrorMessage(locationError,"You can still type an address or choose it on the map."));
+  },{enableHighAccuracy:true,timeout:12000});
+ };
 
  return <>
   <div className="address-field">
    <label htmlFor={inputId}>{label}</label>
    <div className="address"><MapPin size={17}/>
     <input id={inputId} required={!coordinates} value={query} onFocus={()=>setFocused(true)} onBlur={()=>setTimeout(()=>setFocused(false),160)} onChange={event=>changeAddress(event.target.value)} placeholder="Type a street, place or landmark"/>
-    <button type="button" aria-label="Use current location" onClick={locate}>{locating?<span className="spinner small"/>:<LocateFixed size={16}/>}</button>
+    <button type="button" aria-label="Use current location" onClick={useCurrentLocation} disabled={locating||selecting}>{locating?<span className="spinner small"/>:<LocateFixed size={16}/>}</button>
     <button type="button" aria-label="Choose location on map" onClick={()=>setMapOpen(true)}><Navigation size={16}/></button>
    </div>
    <div className="address-tools"><button type="button" onClick={searchNearby} disabled={nearbyBusy}>{nearbyBusy?<span className="spinner small"/>:<Search size={13}/>} Search near me</button>{near&&<button type="button" onClick={()=>setNear(null)}>Clear nearby filter</button>}</div>
@@ -245,22 +255,11 @@ export function Address({label,value,onChange,onSelect,coordinates,locate,locati
    {focused&&!query.trim()&&!near&&recent.length>0&&<div className="address-suggestions recent-locations" role="listbox" aria-label="Recent locations"><small>Recent locations</small>{recent.map((point,index)=><button key={`${point.lat}-${point.lng}-${index}`} type="button" role="option" onMouseDown={event=>event.preventDefault()} onClick={()=>choose(point)}><Clock3 size={15}/><span><b>{point.title||point.address}</b><small>{point.address}</small></span></button>)}</div>}
    {focused&&!query.trim()&&!near&&recent.length===0&&<small className="address-hint">Type to search addresses, choose a recent location, or search near you.</small>}
   </div>
-  {coordinates&&<div className="address-confirmation">
-   {verification&&<p className="address-hint"><strong>Provider-formatted location:</strong> {verification.address}</p>}
-   {verification?.resultType&&<small className="address-hint">Provider result type: {verification.resultType}</small>}
-   {verification?.providerHouseNumber&&verification.customerHouseNumber&&verification.providerHouseNumber.toLowerCase()!==verification.customerHouseNumber.toLowerCase()&&<p className="address-error" role="alert">You entered {verification.customerHouseNumber}, but the provider returned {verification.providerHouseNumber}. Check the final address and pin before confirming; neither number is silently substituted.</p>}
-   <p className={verification?.precision==="building"?"address-hint":"address-error"}>{verification?.precision==="building"&&verification.providerHouseNumber
-    ?`Provider returned a building-level result (${verification.providerHouseNumber}).`
-    :verification?.precision==="street"
-     ?"Street-level result only. The building number could not be independently verified."
-     :verification?.precision
-      ?"The provider returned a place-level result; exact building precision is unavailable."
-      :"This location was copied from an existing order; verify the address and pin before booking again."}</p>
-   {verification?.originalInput&&<small className="address-hint">Your search: {verification.originalInput}</small>}
-   <label>House/building number<input value={verification?.customerHouseNumber||houseNumberFromInput(value)} maxLength="40" onChange={event=>changeHouseNumber(event.target.value)} placeholder="Enter the number you know"/></label>
-   <label>Confirm the final {label.toLowerCase()}<textarea required maxLength="500" value={confirmedAddress||value} onChange={event=>publishConfirmedAddress(event.target.value)} placeholder="Edit the complete address for the rider"/></label>
-   <label>Landmark or delivery instructions (optional)<textarea maxLength="300" value={instructions} onChange={event=>{setInstructions(event.target.value);publishConfirmedAddress(confirmedAddress||value,event.target.value)}} placeholder="Nearby shop, gate colour, compound details, or directions"/></label>
-   <label className="address-confirm-check"><input type="checkbox" required checked={addressConfirmed} onChange={event=>setAddressConfirmed(event.target.checked)}/> I confirm this complete address and the selected map pin.</label>
+  {coordinates&&<div className="address-details">
+   <p className="address-hint"><strong>Selected address:</strong> {confirmedAddress||value}</p>
+   {verification?.providerHouseNumber&&verification.customerHouseNumber&&verification.providerHouseNumber.toLowerCase()!==verification.customerHouseNumber.toLowerCase()&&<p className="address-hint">The search result shows {verification.providerHouseNumber}; your entered number {verification.customerHouseNumber} will be used.</p>}
+   <label>House/building number<input value={verification?.customerHouseNumber??houseNumberFromInput(value)} maxLength="40" onChange={event=>changeHouseNumber(event.target.value)} placeholder="Enter the number you know"/></label>
+   <label>Landmark or delivery instructions (optional)<textarea maxLength="300" value={instructions} onChange={event=>{setInstructions(event.target.value);publishAddress(confirmedAddress||value,event.target.value)}} placeholder="Nearby shop, gate colour, compound details, or directions"/></label>
   </div>}
   {mapOpen&&<LocationPicker initialCoordinates={coordinates} onClose={()=>setMapOpen(false)} onSelect={choose}/>}
  </>;
