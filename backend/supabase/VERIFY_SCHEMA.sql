@@ -56,6 +56,7 @@ with expected_objects (kind, object_name) as (
     ('function', 'get_customer_wallet_balance'),
     ('function', 'reserve_customer_delivery_payment'),
     ('function', 'settle_customer_wallet_payment'),
+    ('function', 'accept_support_conversation'),
     ('function', 'set_delivery_quote_vehicle'),
     ('realtime', 'rider_offers'),
     ('realtime', 'dispatch_alerts'),

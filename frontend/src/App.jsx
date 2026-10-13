@@ -10,7 +10,7 @@ import CustomerDispatchUpdates from "./CustomerDispatchUpdates.jsx";
 import RiderDispatch from "./RiderDispatch.jsx";
 import RiderWallet from "./RiderWallet.jsx";
 import VoiceControl from "./VoiceControl.jsx";
-import {CarePortal,CustomerCareAdmin,CustomerCareChat} from "./CustomerCare.jsx";
+import {AdminSupportInbox,CarePortal,CustomerCareAdmin,CustomerCareChat} from "./CustomerCare.jsx";
 import {bookingDetailsFromConversation} from "./bookingAssistant.js";
 import {Address,DeliveryLocationMap,NavigationLink,geolocationErrorMessage,locationUnavailableMessage,reverseGeocode} from "./MapboxLocation.jsx";
 import {API_BASE} from "./api.js";
@@ -479,7 +479,8 @@ function Admin({session,profile,open,toast}){
  return <main className="page admin-dashboard">
   <div className="admin-head"><div><span className="eyebrow">OPERATIONS</span><h1>FemmaDexDrive control</h1><p>Review suggested delivery prices before customers can pay.</p><small className={`live-indicator ${liveStatus}`}>{liveStatus==="connected"?"Live updates connected":liveStatus==="disconnected"?"Live updates interrupted":"Connecting to live updates"}{lastUpdated?` · Updated ${lastUpdated.toLocaleTimeString()}`:""}</small></div><button className="secondary" onClick={load}><RefreshCw/> Refresh</button></div>
   <div className="metrics"><Metric n={active.length} t="Active records"/><Metric n={awaitingPrice} t="Price reviews"/><Metric n={awaitingRider} t="Awaiting rider"/><Metric n={activeDispatches} t="In dispatch"/><Metric n={completedCount??"—"} t="Completed deliveries"/><Metric n={riders.filter(r=>r.is_online).length} t="Riders online"/></div>
-  <nav className="admin-quick-nav" aria-label="Operations dashboard sections"><a href="#admin-records"><Package size={17}/> Delivery activity</a><a href="#admin-riders"><Bike size={17}/> Rider fleet</a><a href="#admin-dispatch"><Navigation size={17}/> Dispatch control</a><a href="#admin-calls"><Phone size={17}/> Delivery calls</a><a href="#admin-support"><Headphones size={17}/> Customer care</a></nav>
+  <nav className="admin-quick-nav" aria-label="Operations dashboard sections"><a href="#admin-support"><Headphones size={17}/> Customer chats</a><a href="#admin-records"><Package size={17}/> Delivery activity</a><a href="#admin-riders"><Bike size={17}/> Rider fleet</a><a href="#admin-dispatch"><Navigation size={17}/> Dispatch control</a><a href="#admin-calls"><Phone size={17}/> Delivery calls</a></nav>
+  <AdminSupportInbox supabase={supabase} session={session} toast={toast}/>
   <div className="grid">
    <section className="panel admin-records" id="admin-records"><div className="panel-head"><h2>Delivery records</h2><span>{orders.length} loaded</span></div><div className="admin-filters"><input aria-label="Search delivery records" placeholder="Search tracking, customer, address, rider" value={search} onChange={event=>setSearch(event.target.value)}/><select aria-label="Filter by delivery status" value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option value="all">All statuses</option>{[...new Set(orders.map(order=>order.status))].sort().map(status=><option key={status} value={status}>{statusLabels[status]||status}</option>)}</select></div>{filteredOrders.length?filteredOrders.map(order=><button className="order" key={order.id} onClick={()=>{setSelected(order);setPrice(String(order.final_price||""));setAdminNote("")}}><div><b>{order.tracking_number}</b><small>{order.customer?.full_name||"Customer"} · {fmt(order.created_at)}</small></div><span>{statusLabels[order.status]||order.status}</span><strong>{["pending_admin_review","price_review","rejected","expired"].includes(order.status)?"Review required":money(order.final_price)}</strong></button>):<Empty text="No delivery records match these filters."/>}{hasMoreHistory&&<button className="secondary history-more" disabled={loadingHistory} onClick={loadOlderHistory}>{loadingHistory?"Loading records…":"Load older records"}</button>}</section>
    <section className="panel admin-riders" id="admin-riders"><h2>Rider applications</h2>{riders.filter(r=>r.approval_status==="pending").map(r=><div className="job" key={r.id}><b>{r.display_name}</b><p>{r.vehicle_type} · {r.vehicle_registration}</p><div className="actions"><button className="primary" onClick={()=>approve(r.id,true)}>Approve</button><button className="secondary" onClick={()=>approve(r.id,false)}>Reject</button></div></div>)}{riders.filter(r=>r.approval_status==="pending").length===0&&<Empty text="No pending rider applications."/>}</section>
@@ -542,17 +543,17 @@ function Auth({role,mode,close,toast}){
    });
    const result=await response.json().catch(()=>({}));
    if(!response.ok)throw new Error(result.error||"The conversation could not be attached to your account.");
-   const saved=JSON.parse(sessionStorage.getItem("fddCareConversation")||"null");
+   const saved=JSON.parse(localStorage.getItem("fddCareConversation")||sessionStorage.getItem("fddCareConversation")||"null");
    if(saved?.conversationId===conversation.conversationId){
-    sessionStorage.setItem("fddCareConversation",JSON.stringify({...saved,ownerId:authenticatedSession.user.id}));
+    localStorage.setItem("fddCareConversation",JSON.stringify({...saved,ownerId:authenticatedSession.user.id}));
     dispatchEvent(new Event("fdd-care-memory-updated"));
    }
    return"";
   }catch(caught){
    try{
-    const saved=JSON.parse(sessionStorage.getItem("fddCareConversation")||"null");
+    const saved=JSON.parse(localStorage.getItem("fddCareConversation")||sessionStorage.getItem("fddCareConversation")||"null");
     if(saved?.conversationId===conversation.conversationId){
-     sessionStorage.setItem("fddCareConversation",JSON.stringify({...saved,ownerId:authenticatedSession.user.id,memoryTransferError:caught.message}));
+     localStorage.setItem("fddCareConversation",JSON.stringify({...saved,ownerId:authenticatedSession.user.id,memoryTransferError:caught.message}));
      dispatchEvent(new Event("fdd-care-memory-updated"));
     }
    }catch(storageError){
@@ -567,8 +568,8 @@ function Auth({role,mode,close,toast}){
    if(mode==="login"){
     const {data:{session:previousSession}}=await supabase.auth.getSession();
     let conversation=null;
-    try{conversation=JSON.parse(sessionStorage.getItem("fddCareConversation")||"null")}
-    catch{sessionStorage.removeItem("fddCareConversation")}
+    try{conversation=JSON.parse(localStorage.getItem("fddCareConversation")||sessionStorage.getItem("fddCareConversation")||"null")}
+    catch{localStorage.removeItem("fddCareConversation");sessionStorage.removeItem("fddCareConversation")}
     const destination=await signInAndGetDashboard(email,password);
     const transferMessage=destination==="/"&&previousSession?.user?.is_anonymous
      ?await transferGuestCareMemory(previousSession,conversation)

@@ -6,6 +6,7 @@ import {greetingPhrase,voiceCommand,wakeRequest} from "../../frontend/src/voiceC
 const read=path=>readFileSync(new URL(path,import.meta.url),"utf8");
 const careMigration=read("../supabase/migrations/020_customer_care.sql");
 const escalationMigration=read("../supabase/migrations/022_support_escalation.sql");
+const adminChatMigration=read("../supabase/migrations/026_admin_customer_chat_inbox.sql");
 const exceptionMigration=read("../supabase/migrations/021_dispatch_exceptions.sql");
 const termsMigration=read("../supabase/migrations/019_dispatch_terms_acceptance.sql");
 const careHandler=read("../netlify/functions/care-chat.mjs");
@@ -142,9 +143,22 @@ test("human support is persistent, manually accepted, private and escalated afte
  assert.match(careUi,/Accept support request/);
  assert.match(careUi,/Resolve support request/);
  assert.match(careUi,/Loading messages…/);
- assert.match(careUi,/No request is opened or assigned automatically/);
+ assert.match(careUi,/Accept chat and reply/);
  assert.match(read("../netlify/functions/_support-escalation.mjs"),/now-60_000/);
  assert.match(apiServer,/processSupportEscalations/);
+});
+
+test("admin dashboard lists AI and human chats and supports direct replies",()=>{
+ assert.match(adminChatMigration,/role_name in \('admin', 'supervisor'\) or human_requested_at is not null/);
+ assert.match(adminChatMigration,/human_requested_at = coalesce\(human_requested_at, now\(\)\)/);
+ assert.match(careUi,/export function AdminSupportInbox/);
+ assert.match(careUi,/Accept chat and reply/);
+ assert.match(careUi,/Type your reply to the customer/);
+ assert.match(careUi,/\.or\(`support_status\.eq\.waiting,handled_by\.eq\.\$\{session\.user\.id\}`\)/);
+ assert.match(bookingUi,/<AdminSupportInbox supabase=\{supabase\} session=\{session\} toast=\{toast\}\/>/);
+ assert.match(careUi,/localStorage\.setItem\(CARE_CONVERSATION_KEY/);
+ assert.match(careUi,/localStorage\.getItem\(CARE_CONVERSATION_KEY\)/);
+ assert.match(bookingUi,/localStorage\.getItem\("fddCareConversation"\)/);
 });
 
 test("unavailable senders are cancelled without a payment mutation and customer details remain reusable",()=>{

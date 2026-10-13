@@ -1,5 +1,5 @@
 import React,{useEffect,useRef,useState} from "react";
-import {ArrowRight,Clock3,Headphones,MessageCircle,Mic,Send,Volume2,VolumeX,X} from "lucide-react";
+import {ArrowRight,Clock3,Headphones,MessageCircle,Mic,RefreshCw,Send,Volume2,VolumeX,X} from "lucide-react";
 import {API_BASE} from "./api.js";
 import {bookingDetailsFromConversation} from "./bookingAssistant.js";
 import "./customer-care-chat.css";
@@ -46,7 +46,8 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
  useEffect(()=>{
   const restore=()=>{
    try{
-    const saved=JSON.parse(sessionStorage.getItem(CARE_CONVERSATION_KEY)||"null");
+    const saved=JSON.parse(localStorage.getItem(CARE_CONVERSATION_KEY)||sessionStorage.getItem(CARE_CONVERSATION_KEY)||"null");
+    if(saved&&!localStorage.getItem(CARE_CONVERSATION_KEY))localStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify(saved));
     const isGuestSession=saved?.ownerId===null&&typeof saved.guestSessionToken==="string"&&saved.guestSessionToken;
     const belongsToCustomer=session&&saved?.ownerId===session.user.id&&typeof saved.conversationId==="string";
     if(!isGuestSession&&!belongsToCustomer)return;
@@ -72,8 +73,8 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   if(!careMemoryRestored.current)return;
   if(skipCareMemorySave.current){skipCareMemorySave.current=false;return}
   try{
-   if(!conversationId&&!guestSessionToken){sessionStorage.removeItem(CARE_CONVERSATION_KEY);return}
-   sessionStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify({
+   if(!conversationId&&!guestSessionToken){localStorage.removeItem(CARE_CONVERSATION_KEY);sessionStorage.removeItem(CARE_CONVERSATION_KEY);return}
+   localStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify({
     ownerId:guestSessionToken?null:session?.user?.id||null,
     conversationId,
     guestSessionToken,
@@ -113,7 +114,7 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
     setConversationId(null);
     setConversationStatus("waiting");
     setOpen(true);
-    setNotice("You are chatting as a guest. Messages are saved in this browser for 12 hours; sign in if you want a human customer-care agent.");
+    setNotice("Your guest chat history is saved on this device. Sign in if you want a human customer-care agent.");
     return;
    }
    if(!supabase){setError("Customer care is unavailable because the account service is not configured.");return}
@@ -146,7 +147,7 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
    setGuestSessionToken("");
    setNotice("");
    const loadedMessages=await loadMessages(id);
-   sessionStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify({
+   localStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify({
     ownerId:activeSession.user.id,
     conversationId:id,
     conversationStatus:existing?.support_status||"waiting",
@@ -457,16 +458,18 @@ export function CarePortal({session,profile,supabase,open,toast}){
  return <main className="page care-inbox-page"><section className="panel"><div className="panel-head"><div><span className="eyebrow">APPROVED CUSTOMER CARE</span><h1>Support inbox</h1><p>Go available to view and manually accept waiting support requests.</p></div><button className={agent.is_available?"secondary":"primary"} onClick={availability}>{agent.is_available?"Go offline":"Go available"}</button></div><div className="care-inbox"><div className="care-thread-list">{conversations.length?conversations.map(conversation=><button key={conversation.id} className={selected?.id===conversation.id?"care-thread selected":"care-thread"} onClick={()=>{setSelected(conversation);setMessages([])}}><b>{conversation.support_status==="waiting"?"Waiting for acceptance":"Assigned support request"}{conversation.needs_attention?" · Needs attention":""}</b><small>{new Date(conversation.updated_at).toLocaleString()}</small></button>):<p>No support requests are waiting or assigned to you.</p>}</div><div className="care-thread-view">{selected?<><p className="care-request-status">Status: {selected.support_status}{selected.needs_attention?" · Awaiting attention":""}</p>{selected.support_status==="waiting"&&<button className="primary" onClick={accept} disabled={loading}>Accept support request</button>}<div className="care-messages">{messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}><p>{message.body}</p><small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"Customer"} · {time(message.created_at)}</small></article>)}</div>{selected.support_status!=="waiting"&&<><form className="care-form" onSubmit={send}><input aria-label="Customer-care reply" value={draft} onChange={event=>setDraft(event.target.value)} maxLength={2000} placeholder="Reply to customer"/><button className="primary" disabled={loading||!draft.trim()}><Send size={16}/> Send</button></form><button className="secondary" onClick={resolve} disabled={loading}>Resolve support request</button></>}</>:<p>Select a request to preview its conversation. Requests are not accepted automatically.</p>}</div></div></section></main>;
 }
 
-function AdminSupportInbox({supabase,toast}){
- const [requests,setRequests]=useState([]),[selected,setSelected]=useState(null),[messages,setMessages]=useState([]),[customer,setCustomer]=useState(null),[draft,setDraft]=useState(""),[loading,setLoading]=useState(false),[loadingMessages,setLoadingMessages]=useState(false);
+export function AdminSupportInbox({supabase,toast,session}){
+ const [requests,setRequests]=useState([]),[selected,setSelected]=useState(null),[messages,setMessages]=useState([]),[customer,setCustomer]=useState(null),[draft,setDraft]=useState(""),[loading,setLoading]=useState(false),[loadingRequests,setLoadingRequests]=useState(true),[loadingMessages,setLoadingMessages]=useState(false);
  const load=async()=>{
+  setLoadingRequests(true);
   const {data,error}=await supabase.from("support_conversations")
-   .select("id,customer_id,support_status,needs_attention,human_requested_at,updated_at")
-   .not("human_requested_at","is",null)
-   .neq("support_status","resolved").order("updated_at",{ascending:false}).limit(50);
-  if(error){toast(`Could not load support requests: ${error.message}`);return}
+   .select("id,customer_id,support_status,needs_attention,human_requested_at,handled_by,updated_at,customer:profiles!support_conversations_customer_id_fkey(full_name,email)")
+   .or(`support_status.eq.waiting,handled_by.eq.${session.user.id}`)
+   .neq("support_status","resolved").neq("status","closed").order("updated_at",{ascending:false}).limit(100);
+  if(error){toast(`Could not load customer chats: ${error.message}`);setLoadingRequests(false);return}
   setRequests(data||[]);
   setSelected(current=>current?(data?.find(row=>row.id===current.id)||null):null);
+  setLoadingRequests(false);
  };
  useEffect(()=>{
   void load();
@@ -475,7 +478,7 @@ function AdminSupportInbox({supabase,toast}){
    .subscribe(status=>{if(status==="CHANNEL_ERROR")toast("Live support-request updates are unavailable. Refresh the admin dashboard.")});
   const timer=setInterval(load,15000);
   return()=>{clearInterval(timer);supabase.removeChannel(channel)};
- },[supabase,toast]);
+ },[supabase,toast,session?.user?.id]);
  useEffect(()=>{
   if(!selected){setMessages([]);setCustomer(null);return}
   let active=true;
@@ -523,7 +526,7 @@ function AdminSupportInbox({supabase,toast}){
   else{toast("Support request resolved.");setSelected(null);await load()}
   setLoading(false);
  };
- return <section className="panel care-applications" id="admin-support"><span className="eyebrow">CUSTOMER CARE</span><h2>Support requests</h2><p>Review each request and choose when to accept it. AI replies do not count as human responses.</p><div className="care-inbox"><div className="care-thread-list">{requests.length?requests.map(request=><button key={request.id} className={selected?.id===request.id?"care-thread selected":"care-thread"} onClick={()=>setSelected(request)}><b>{request.support_status}{request.needs_attention?" · Needs attention":""}</b><small>{request.id.slice(0,8)} · {new Date(request.updated_at).toLocaleString()}</small></button>):<p>No open support requests.</p>}</div><div className="care-thread-view">{selected?<><p className="care-request-status">{loadingMessages?"Loading conversation…":`Customer: ${customer?.full_name||customer?.email||selected.customer_id}`}<br/>Status: {selected.support_status}{selected.needs_attention?" · Awaiting attention":""}</p>{selected.support_status==="waiting"&&<button className="primary" onClick={accept} disabled={loading}>Accept support request</button>}{loadingMessages?<p role="status">Loading messages…</p>:<div className="care-messages">{messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}><p>{message.body}</p><small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"Customer"} · {time(message.created_at)}</small></article>)}</div>}{selected.support_status!=="waiting"&&<><form className="care-form" onSubmit={send}><input aria-label="Customer-care reply" value={draft} onChange={event=>setDraft(event.target.value)} maxLength={2000} placeholder="Reply to customer"/><button className="primary" disabled={loading||!draft.trim()}><Send size={16}/> Send</button></form><button className="secondary" onClick={resolve} disabled={loading}>Resolve support request</button></>}</>:<p>Select a support request to load its conversation. No request is opened or assigned automatically.</p>}</div></div></section>;
+ return <section className="panel care-applications" id="admin-support"><div className="panel-head"><div><span className="eyebrow">CUSTOMER CARE</span><h2>Customer chats</h2></div><button className="secondary" onClick={()=>void load()} disabled={loadingRequests}><RefreshCw size={16}/> Refresh chats</button></div><p>View AI conversations and human-support requests. Accept a waiting chat to reply directly as FemmaDexDrive.</p><div className="care-inbox"><div className="care-thread-list">{requests.length?requests.map(request=><button key={request.id} className={selected?.id===request.id?"care-thread selected":"care-thread"} onClick={()=>{setSelected(request);setDraft("")}}><b>{request.customer?.full_name||request.customer?.email||"Customer"}{request.needs_attention?" · Needs attention":""}</b><small>{request.human_requested_at?"Requested a human reply":request.support_status==="waiting"?"AI chat · awaiting admin":"Assigned to you"} · {new Date(request.updated_at).toLocaleString()}</small></button>):<p>{loadingRequests?"Loading customer chats…":"No open customer chats."}</p>}</div><div className="care-thread-view">{selected?<><p className="care-request-status">{loadingMessages?"Loading conversation…":`Customer: ${customer?.full_name||customer?.email||selected.customer_id}`}<br/>Status: {selected.support_status}{selected.needs_attention?" · Awaiting attention":""}</p>{selected.support_status==="waiting"&&<button className="primary" onClick={accept} disabled={loading}>Accept chat and reply</button>}{loadingMessages?<p role="status">Loading messages…</p>:<div className="care-messages">{messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}><p>{message.body}</p><small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"Customer"} · {time(message.created_at)}</small></article>)}</div>}{selected.support_status!=="waiting"&&selected.handled_by===session?.user?.id&&<><form className="care-form" onSubmit={send}><input aria-label="Reply to customer" value={draft} onChange={event=>setDraft(event.target.value)} maxLength={2000} placeholder="Type your reply to the customer"/><button className="primary" disabled={loading||!draft.trim()}><Send size={16}/> Send reply</button></form><button className="secondary" onClick={resolve} disabled={loading}>Resolve chat</button></>}</>:<p>Select a customer chat to read it and reply.</p>}</div></div></section>;
 }
 
 export function CustomerCareAdmin({supabase,toast}){
@@ -548,5 +551,5 @@ export function CustomerCareAdmin({supabase,toast}){
   toast(approved?"Customer-care application approved.":"Customer-care application rejected.");
   await load();
  };
- return <><section className="panel care-applications"><span className="eyebrow">CUSTOMER CARE</span><h2>Customer-care applications</h2>{applications.length?applications.map(application=><article className="job" key={application.id}><b>{application.profile?.full_name||"Customer-care applicant"}</b><p>{application.profile?.email||"Email unavailable"} · {application.profile?.phone||"Phone unavailable"}</p><div className="actions"><button className="primary" onClick={()=>decide(application.id,true)}>Approve</button><button className="secondary" onClick={()=>decide(application.id,false)}>Reject</button></div></article>):<p>No pending customer-care applications.</p>}</section><AdminSupportInbox supabase={supabase} toast={toast}/></>;
+ return <section className="panel care-applications"><span className="eyebrow">CUSTOMER CARE</span><h2>Customer-care applications</h2>{applications.length?applications.map(application=><article className="job" key={application.id}><b>{application.profile?.full_name||"Customer-care applicant"}</b><p>{application.profile?.email||"Email unavailable"} · {application.profile?.phone||"Phone unavailable"}</p><div className="actions"><button className="primary" onClick={()=>decide(application.id,true)}>Approve</button><button className="secondary" onClick={()=>decide(application.id,false)}>Reject</button></div></article>):<p>No pending customer-care applications.</p>}</section>;
 }
