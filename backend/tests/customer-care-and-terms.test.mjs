@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import {voiceCommand} from "../../frontend/src/voiceCommands.js";
+import {greetingPhrase,voiceCommand,wakeRequest} from "../../frontend/src/voiceCommands.js";
 
 const read=path=>readFileSync(new URL(path,import.meta.url),"utf8");
 const careMigration=read("../supabase/migrations/020_customer_care.sql");
@@ -41,7 +41,7 @@ test("AI responses are server-configured, authenticated and cannot create or pay
  assert.match(careHandler,/Mandatory service boundaries: Never create, claim to create, cancel, price, pay for, or modify an order/);
  assert.doesNotMatch(careHandler,/create-paystack-payment|create_delivery_quote|orders'\)\.insert/);
  assert.match(apiServer,/\["care-chat", \{ method: "POST"/);
- assert.match(careUi,/fddVoiceBookingRequest/);
+ assert.match(bookingUi,/fddVoiceBookingRequest/);
  assert.match(careUi,/fddCareConversation/);
  assert.match(bookingUi,/transferGuestCareMemory/);
  assert.match(careUi,/never submits or pays for an order/);
@@ -56,7 +56,12 @@ test("homepage makes booking and AI help prominent and shows the current deliver
  assert.match(bookingUi,/Talk to AI/);
  assert.match(bookingUi,/Become a Rider/);
  assert.match(bookingUi,/Track a Package/);
- assert.match(bookingUi,/signInAnonymously/);
+ assert.doesNotMatch(bookingUi,/signInAnonymously/);
+ assert.match(apiServer,/\["care-guest-session", \{ method: "POST"/);
+ assert.match(apiServer,/\["care-guest-chat", \{ method: "POST"/);
+ assert.match(careUi,/care-guest-session/);
+ assert.match(careUi,/care-guest-chat/);
+ assert.match(bookingUi,/Your delivery draft is saved on this device/);
  assert.match(bookingUi,/Contact email \(for your Paystack receipt\)/);
  assert.match(bookingUi,/src="\/images\/Logo-mark\.png"/);
  assert.match(bookingUi,/className="page admin-dashboard"/);
@@ -68,7 +73,7 @@ test("homepage makes booking and AI help prominent and shows the current deliver
  assert.match(bookingUi,/id:"bulky",title:"Large & Bulky Items",description:"Furniture, appliances and large or heavy boxes\."/);
  assert.match(bookingUi,/id:"fast",title:"Fast Delivery — Within 2 Hours"/);
  assert.match(bookingUi,/2-hour target after rider acceptance/);
- assert.match(bookingUi,/Book without creating an account/);
+ assert.match(bookingUi,/Prepare your delivery draft without signing in/);
  assert.match(bookingUi,/import VoiceControl from "\.\/VoiceControl\.jsx"/);
  assert.match(bookingUi,/<VoiceControl\/>/);
  assert.match(bookingUi,/fdd-voice-fill/);
@@ -80,15 +85,26 @@ test("homepage makes booking and AI help prominent and shows the current deliver
  assert.match(voiceUi,/Choose a map suggestion to confirm its location/);
  assert.match(voiceUi,/feminineVoiceNames/);
  assert.match(voiceUi,/recognition\.continuous=true/);
+ assert.match(voiceUi,/sleepAfterSilence/);
+ assert.match(voiceUi,/10_000/);
  assert.match(voiceUi,/getUserMedia\(\{audio:true\}\)/);
  assert.match(voiceUi,/Heard request — edit before sending/);
  assert.match(voiceUi,/recognition\.maxAlternatives=4/);
  assert.match(voiceUi,/speakMessage\(reply,selectedLanguage,resume\)/);
  assert.doesNotMatch(voiceUi,/getQuote|create-paystack-payment|\.submit\(/);
  assert.match(careUi,/Start private chat as a guest/);
- assert.match(careUi,/speakReply\(conversationId,message\.body\)/);
+ assert.match(careUi,/speakReply\(conversationId,message\.body,message\.id\)/);
  assert.match(homepageStyles,/prefers-reduced-motion:reduce/);
  assert.match(homepageStyles,/max-width:420px/);
+});
+
+test("voice wakes on the branded greeting and returns to wake-only mode after silence",()=>{
+ assert.deepEqual(wakeRequest("FemmaDex hi"),{text:""});
+ assert.deepEqual(wakeRequest("Hey FemmaDex, book a delivery"),{text:"book a delivery"});
+ assert.equal(greetingPhrase("yo-NG"),"bawo ni");
+ assert.equal(greetingPhrase("fr-FR"),"bonjour");
+ assert.match(voiceUi,/Voice is resting after 10 seconds of silence/);
+ assert.match(voiceUi,/Stop voice and close/);
 });
 
 test("voice commands understand natural phrasing, transcription variations and explain available services",()=>{
@@ -164,7 +180,7 @@ test("quotes require and persist explicit terms acceptance before route creation
 test("the /book entry keeps the authenticated booking flow and exact saved recipient pin",()=>{
  assert.match(bookingUi,/if\(p==="\/book"\)return"book"/);
  assert.match(bookingUi,/page==="customer"\|\|page==="book"/);
- assert.match(bookingUi,/if\(!session\)return <Landing open=\{open\}\/>/);
+ assert.match(bookingUi,/if\(!session&&!allowGuestBooking\)return <Landing open=\{open\}\/>/);
  assert.match(bookingUi,/name="deliveryCategory"/);
  assert.match(bookingUi,/api\("quote"/);
  assert.match(bookingUi,/api\("create-paystack-payment"/);

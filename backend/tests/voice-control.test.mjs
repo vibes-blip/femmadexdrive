@@ -13,7 +13,7 @@ test("spoken stop and close commands end recognition and hide the voice panel",(
  assert.match(voiceUi,/setOpen\(false\)/);
  assert.match(voiceUi,/onClick=\{\(\)=>\{stop\(\);setOpen\(false\)\}\}/);
  assert.match(voiceUi,/aria-label="Stop and close voice control"/);
- assert.match(voiceUi,/aria-label="Close voice panel"/);
+ assert.match(voiceUi,/aria-label=\{wakeEnabled\?"Stop voice and close":"Close voice panel"\}/);
 });
 
 test("FemmaDex greeting returns a spoken conversational welcome",()=>{
@@ -28,6 +28,8 @@ test("wake phrase listens only after explicit microphone approval and opens an e
  assert.deepEqual(wakeRequest("FemmaDex, hi"),{text:""});
  assert.deepEqual(wakeRequest("FemmaDex hi book delivery"),{text:"book delivery"});
  assert.deepEqual(wakeRequest("FemmaDex bawo ni"),{text:""});
+ assert.deepEqual(wakeRequest("FemmaDex buenos días"),{text:""});
+ assert.deepEqual(wakeRequest("Hey FemmaDex, good evening"),{text:""});
  assert.equal(wakeRequest("book delivery"),null);
  assert.match(voiceUi,/getUserMedia\(\{audio:true\}\)/);
  assert.match(voiceUi,/Allow microphone and enable wake phrase/);
@@ -35,6 +37,7 @@ test("wake phrase listens only after explicit microphone approval and opens an e
  assert.match(voiceUi,/setOpen\(true\)/);
  assert.match(voiceUi,/Heard request — edit before sending/);
  assert.match(voiceUi,/Send voice request/);
+ assert.match(voiceUi,/fdd-care-voice-message/);
  assert.match(voiceUi,/voiceLanguages/);
  assert.match(voiceUi,/openRef\.current/);
 });
@@ -43,6 +46,9 @@ test("voice and chat launchers are icon-only and conversational languages are no
  assert.match(voiceUi,/<Mic size=\{21\}\/>/);
  assert.match(careUi,/aria-label=\{open\?"Close FemmaDexCare":"Open FemmaDexCare"\}/);
  assert.doesNotMatch(careUi,/<span>FemmaDexCare<\/span>/);
+ assert.match(careUi,/fdd-care-voice-message/);
+ assert.match(careUi,/pendingVoiceMessage/);
+ assert.match(careUi,/feminineVoiceNames/);
  assert.equal(voiceCommand("Hola","es-ES").type,"reply");
  assert.equal(voiceCommand("Bonjour","fr-FR").type,"reply");
  assert.equal(voiceCommand("Olá","pt-PT").type,"reply");

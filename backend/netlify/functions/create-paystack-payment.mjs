@@ -36,6 +36,14 @@ export async function markPayment(data){
   return applied===true;
 }
 
+async function releaseWalletReservation(db,paymentId){
+  const {error}=await db.from("payments")
+    .update({status:"failed",paystack_status:"wallet_settlement_failed"})
+    .eq("id",paymentId)
+    .eq("status","pending");
+  if(error)console.error("Could not release failed wallet-credit reservation",error.message);
+}
+
 export default async req=>{
   if(req.method==="OPTIONS") return new Response("",{status:204});
   try{
@@ -45,7 +53,6 @@ export default async req=>{
     const {data:customerProfile,error:customerProfileError}=await db.from("profiles").select("email").eq("id",user.id).maybeSingle();
     if(customerProfileError)throw new Error("Could not retrieve the customer email for Paystack.");
     const paymentEmail=user.email||customerProfile?.email;
-    if(!paymentEmail)throw new HttpError("Add a valid contact email before starting secure payment.",400);
     const {data:quote,error:quoteError}=await db.from("delivery_quote_reviews")
       .select("approved_price,status,expires_at")
       .eq("order_id",o.id)
@@ -69,9 +76,18 @@ export default async req=>{
     const approvedPrice=isReviewedQuote?Number(quote.approved_price):Number(o.final_price);
     if(!Number.isFinite(approvedPrice)||approvedPrice<=0) throw new Error("Invalid delivery price");
 
-    const {data:pending,error:pendingError}=await db.from("payments").select("id,reference").eq("order_id",o.id).eq("status","pending").maybeSingle();
+    const {data:pending,error:pendingError}=await db.from("payments").select("id,reference,amount,wallet_credit").eq("order_id",o.id).eq("status","pending").maybeSingle();
     if(pendingError) throw pendingError;
     if(pending){
+      if(Number(pending.amount)===0){
+        const {data:settled,error:settlementError}=await db.rpc("settle_customer_wallet_payment",{p_payment_id:pending.id});
+        if(settlementError||settled!==true){
+          console.error("Could not retry a wallet-only customer payment",settlementError?.message||"No successful settlement was returned");
+          await releaseWalletReservation(db,pending.id);
+          throw new HttpError("Delivery credit could not be applied. Your balance was not spent; please try again.",409);
+        }
+        return json({alreadyPaid:true,walletOnly:true,walletCredit:Number(pending.wallet_credit||0)});
+      }
       let existingTransaction;
       try{
         existingTransaction=await verifyReference(pending.reference);
@@ -82,7 +98,7 @@ export default async req=>{
       const existingStatus=String(existingTransaction.status||"").toLowerCase();
       if(existingStatus==="success"){
         const applied=await markPayment(existingTransaction);
-        if(applied)return json({alreadyPaid:true,reference:pending.reference});
+        if(applied)return json({alreadyPaid:true,reference:pending.reference,walletCredit:Number(pending.wallet_credit||0)});
         throw new HttpError("Paystack reports this payment succeeded, but FemmaDexDrive could not confirm it. Please contact support; do not pay again.",409);
       }
       if(["failed","abandoned","reversed"].includes(existingStatus)){
@@ -93,12 +109,39 @@ export default async req=>{
     }
 
     const reference=`FDD-${o.tracking_number}-${crypto.randomUUID().slice(0,8)}`;
-    const {data:p,error:pe}=await db.from("payments").insert({order_id:o.id,customer_id:user.id,amount:approvedPrice,currency:"NGN",status:"pending",reference}).select("*").single();
-    if(pe){
-      if(pe.code==="23505") throw new HttpError("A payment is already in progress for this delivery. Wait for its status before trying again.",409);
-      throw pe;
+    const {data:reservation,error:reservationError}=await db.rpc("reserve_customer_delivery_payment",{
+      p_order_id:o.id,
+      p_reference:reference
+    });
+    if(reservationError){
+      if(reservationError.code==="23505"||/payment is already in progress/i.test(reservationError.message||"")) {
+        throw new HttpError("A payment is already in progress for this delivery. Wait for its status before trying again.",409);
+      }
+      console.error("Could not reserve customer wallet credit for payment",reservationError.message);
+      throw new HttpError(reservationError.message||"Could not prepare this payment. Please try again.",409);
     }
+    const p=Array.isArray(reservation)?reservation[0]:reservation;
     if(!p) throw new Error("Could not create payment record");
+    const amountDue=Number(p.amount);
+    const walletCredit=Number(p.wallet_credit||0);
+    if(!Number.isFinite(amountDue)||amountDue<0||!Number.isFinite(walletCredit)||walletCredit<0||Math.round((amountDue+walletCredit)*100)!==Math.round(approvedPrice*100)) {
+      await releaseWalletReservation(db,p.id);
+      throw new HttpError("The delivery wallet credit could not be verified. Please contact support before retrying.",409);
+    }
+
+    if(amountDue===0){
+      const {data:settled,error:settlementError}=await db.rpc("settle_customer_wallet_payment",{p_payment_id:p.id});
+      if(settlementError||settled!==true){
+        console.error("Could not settle a wallet-only customer payment",settlementError?.message||"No successful settlement was returned");
+        await releaseWalletReservation(db,p.id);
+        throw new HttpError("Delivery credit could not be applied. Your balance was not spent; please try again.",409);
+      }
+      return json({alreadyPaid:true,walletOnly:true,walletCredit});
+    }
+    if(!paymentEmail){
+      await releaseWalletReservation(db,p.id);
+      throw new HttpError("Add a valid contact email before starting secure payment.",400);
+    }
 
     const origin=process.env.RENDER_EXTERNAL_URL||new URL(req.url).origin;
     let d;
@@ -106,12 +149,12 @@ export default async req=>{
       d=await paystack("/transaction/initialize",{
         method:"POST",
         body:JSON.stringify({
-          amount:Math.round(approvedPrice*100),
+          amount:Math.round(amountDue*100),
           email:paymentEmail,
           currency:"NGN",
           reference,
           callback_url:new URL("/api/paystack-callback",origin).href,
-          metadata:{order_id:o.id,tracking_number:o.tracking_number},
+          metadata:{order_id:o.id,tracking_number:o.tracking_number,wallet_credit:walletCredit},
           channels:["card","bank","ussd","bank_transfer","mobile_money"]
         })
       });
@@ -120,6 +163,6 @@ export default async req=>{
       if(updateError) console.error("Could not mark failed payment initialization",updateError.message);
       throw error;
     }
-    return json({checkoutUrl:d.data.authorization_url,reference,accessCode:d.data.access_code});
+    return json({checkoutUrl:d.data.authorization_url,reference,accessCode:d.data.access_code,amountDue,walletCredit});
   }catch(e){return err(e)}
 };

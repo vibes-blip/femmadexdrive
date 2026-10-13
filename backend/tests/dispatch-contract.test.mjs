@@ -48,7 +48,9 @@ test("checkout requires the approved unpaid quote and sends its exact approved a
   assert.match(paymentHandler, /o\.status\s*!==\s*"approved"/);
   assert.match(paymentHandler, /o\.payment_status\s*!==\s*"unpaid"/);
   assert.match(paymentHandler, /Number\(quote\.approved_price\)\s*!==\s*Number\(o\.final_price\)/);
-  assert.match(paymentHandler, /amount:\s*Math\.round\(approvedPrice\s*\*\s*100\)/);
+  assert.match(paymentHandler, /amount:\s*Math\.round\(amountDue\s*\*\s*100\)/);
+  assert.match(paymentHandler, /reserve_customer_delivery_payment/);
+  assert.match(paymentHandler, /settle_customer_wallet_payment/);
   assert.match(paymentMigration, /coalesce\(p_amount_minor,\s*-1\)\s*<>\s*round\(payment_row\.amount\s*\*\s*100\)::bigint/);
   assert.match(offerMigration, /vehicle_reviewed_at\s+is\s+not\s+null/);
 });

@@ -203,7 +203,7 @@ function welcomeMessageFor(locale){
 
 export function wakeRequest(transcript){
  const normalized=normalize(transcript);
- const match=normalized.match(/(?:^|\s)(?:hey\s+)?femma\s*dex(?:\s+(?:hi|hello|hey|bonjour|salut|hola|ola|habari|jambo|sannu|ndewo|kedu|hujambo|bawo\s+ni|e\s+kaaro|eku\s+abo|ina\s+kwana|barka\s+da\s+safiya|bom\s+dia|boa\s+tarde|مرحبا))?(?:\s+(.*))?$/u);
+ const match=normalized.match(/(?:^|\s)(?:hey\s+)?femma\s*dex(?:\s+(?:hi|hello|hey|good\s+morning|good\s+afternoon|good\s+evening|bonjour|salut|bonsoir|hola|buenos\s+dias|buenas\s+tardes|buenas\s+noches|ola|bom\s+dia|boa\s+tarde|boa\s+noite|habari|jambo|sannu|barka\s+da\s+safiya|barka\s+da\s+yamma|ndewo|kedu|hujambo|bawo\s+ni|e\s+kaaro|eku\s+abo|ina\s+kwana|مرحبا|السلام\s+عليكم))?(?:\s+(.*))?$/u);
  if(!match)return null;
  return{text:(match[1]||"").trim()};
 }

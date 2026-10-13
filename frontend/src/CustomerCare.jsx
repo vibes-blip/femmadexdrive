@@ -1,11 +1,14 @@
 import React,{useEffect,useRef,useState} from "react";
 import {ArrowRight,Clock3,Headphones,MessageCircle,Mic,Send,Volume2,VolumeX,X} from "lucide-react";
 import {API_BASE} from "./api.js";
+import {bookingDetailsFromConversation} from "./bookingAssistant.js";
+import "./customer-care-chat.css";
 
 const clean=value=>String(value||"").replace(/[<>]/g,"").trim();
 const time=value=>value?new Date(value).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"";
 const aiLanguage=()=>navigator.language||"en";
 const CARE_CONVERSATION_KEY="fddCareConversation";
+const feminineVoiceNames=/female|woman|zira|samantha|susan|karen|tessa|victoria|ava|salli|joanna|aria|jenny|natasha|linda|moira|fiona|serena|allison|emma|amy|olivia/i;
 
 function speechRecognition(){
  if(typeof window==="undefined")return null;
@@ -13,16 +16,17 @@ function speechRecognition(){
 }
 
 export function CustomerCareChat({session,supabase,toast,open:openAuth}){
- const [open,setOpen]=useState(false),[loading,setLoading]=useState(false),[conversationId,setConversationId]=useState(null),[conversationStatus,setConversationStatus]=useState("waiting");
+ const [open,setOpen]=useState(false),[loading,setLoading]=useState(false),[conversationId,setConversationId]=useState(null),[guestSessionToken,setGuestSessionToken]=useState(""),[conversationStatus,setConversationStatus]=useState("waiting");
  const [messages,setMessages]=useState([]),[text,setText]=useState(""),[notice,setNotice]=useState(""),[error,setError]=useState("");
- const [listening,setListening]=useState(false),[speaking,setSpeaking]=useState(false),[muted,setMuted]=useState(false);
- const recognitionRef=useRef(null),audioRef=useRef(null),careMemoryRestored=useRef(false),skipCareMemorySave=useRef(false);
+ const [listening,setListening]=useState(false),[speaking,setSpeaking]=useState(false),[muted,setMuted]=useState(false),[speakingMessageId,setSpeakingMessageId]=useState(null);
+ const recognitionRef=useRef(null),audioRef=useRef(null),careMemoryRestored=useRef(false),skipCareMemorySave=useRef(false),pendingVoiceMessage=useRef("");
  const stopCurrentSpeech=()=>{
   window.speechSynthesis?.cancel();
   const active=audioRef.current;
   audioRef.current=null;
   if(active){active.audio.pause();active.audio.src="";URL.revokeObjectURL(active.url)}
   setSpeaking(false);
+  setSpeakingMessageId(null);
  };
 
  useEffect(()=>()=>{recognitionRef.current?.stop();stopCurrentSpeech()},[]);
@@ -32,14 +36,22 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   addEventListener("fdd-open-care",show);
   return()=>removeEventListener("fdd-open-care",show);
  },[]);
+ useEffect(()=>{
+  if(!open)return;
+  const onKeyDown=event=>{if(event.key==="Escape"){stopVoice();stopCurrentSpeech();setOpen(false)}};
+  window.addEventListener("keydown",onKeyDown);
+  return()=>window.removeEventListener("keydown",onKeyDown);
+ },[open]);
 
  useEffect(()=>{
   const restore=()=>{
-   if(!session)return;
    try{
     const saved=JSON.parse(sessionStorage.getItem(CARE_CONVERSATION_KEY)||"null");
-    if(!saved||saved.ownerId!==session.user.id||typeof saved.conversationId!=="string")return;
-    setConversationId(saved.conversationId);
+    const isGuestSession=saved?.ownerId===null&&typeof saved.guestSessionToken==="string"&&saved.guestSessionToken;
+    const belongsToCustomer=session&&saved?.ownerId===session.user.id&&typeof saved.conversationId==="string";
+    if(!isGuestSession&&!belongsToCustomer)return;
+    setGuestSessionToken(isGuestSession?saved.guestSessionToken:"");
+    setConversationId(isGuestSession?null:saved.conversationId);
     setConversationStatus(saved.conversationStatus||"waiting");
     setMessages(Array.isArray(saved.messages)?saved.messages:[]);
     setText(saved.draftText||"");
@@ -60,17 +72,18 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   if(!careMemoryRestored.current)return;
   if(skipCareMemorySave.current){skipCareMemorySave.current=false;return}
   try{
-   if(!conversationId){sessionStorage.removeItem(CARE_CONVERSATION_KEY);return}
+   if(!conversationId&&!guestSessionToken){sessionStorage.removeItem(CARE_CONVERSATION_KEY);return}
    sessionStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify({
-    ownerId:session?.user?.id||null,
+    ownerId:guestSessionToken?null:session?.user?.id||null,
     conversationId,
+    guestSessionToken,
     conversationStatus,
     messages,
     draftText:text,
     notice
    }));
   }catch(caught){setError(`Your FemmaDexCare history could not be saved on this device: ${caught.message}`)}
- },[session?.user?.id,conversationId,conversationStatus,messages,text,notice]);
+ },[session?.user?.id,conversationId,guestSessionToken,conversationStatus,messages,text,notice]);
 
  const loadMessages=async id=>{
   const {data,error:loadError}=await supabase.from("support_messages").select("id,sender_type,body,created_at")
@@ -81,23 +94,30 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
  };
 
  useEffect(()=>{
-  if(!session||!conversationId)return;
+  if(!session||!conversationId||guestSessionToken)return;
   let active=true;
   loadMessages(conversationId).catch(caught=>{if(active)setError(caught.message)});
   return()=>{active=false};
- },[session?.user?.id,conversationId]);
+ },[session?.user?.id,conversationId,guestSessionToken]);
 
  const start=async()=>{
   if(loading)return;
-  if(!supabase){setError("Customer care is unavailable because the account service is not configured.");return}
   setLoading(true);setError("");
   try{
-   let activeSession=session;
-   if(!activeSession){
-    const {data,error:authError}=await supabase.auth.signInAnonymously();
-    if(authError)throw new Error(`Guest support is unavailable: ${authError.message}. Enable anonymous sign-ins in Supabase or sign in to continue.`);
-    activeSession=data.session;
+   if(!session){
+    const response=await fetch(`${API_BASE}/care-guest-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(result.error||"Guest support is temporarily unavailable.");
+    if(typeof result.token!=="string"||!result.token)throw new Error("Guest support did not return a secure session.");
+    setGuestSessionToken(result.token);
+    setConversationId(null);
+    setConversationStatus("waiting");
+    setOpen(true);
+    setNotice("You are chatting as a guest. Messages are saved in this browser for 12 hours; sign in if you want a human customer-care agent.");
+    return;
    }
+   if(!supabase){setError("Customer care is unavailable because the account service is not configured.");return}
+   let activeSession=session;
    if(!activeSession)throw new Error("Could not create a private customer-care session.");
    const {data:existing,error:existingError}=await supabase.from("support_conversations")
     .select("id,support_status,human_requested_at")
@@ -123,6 +143,7 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
     setConversationStatus("waiting");
    }
    setConversationId(id);
+   setGuestSessionToken("");
    setNotice("");
    const loadedMessages=await loadMessages(id);
    sessionStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify({
@@ -134,7 +155,10 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
     notice:""
    }));
    dispatchEvent(new Event("fdd-care-memory-updated"));
-  }catch(caught){setError(caught.message||"Could not start customer care.")}
+  }catch(caught){
+   if(pendingVoiceMessage.current){setText(pendingVoiceMessage.current);pendingVoiceMessage.current=""}
+   setError(caught.message||"Could not start customer care.")
+  }
   finally{setLoading(false)}
  };
 
@@ -155,9 +179,38 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
 
  const send=async(message,requestHuman=false)=>{
   const body=clean(message);
-  if(!conversationId||!body||loading)return;
+  if((!conversationId&&!guestSessionToken)||!body||loading)return;
   setLoading(true);setError("");setNotice("");
   try{
+   if(guestSessionToken){
+    let response=await fetch(`${API_BASE}/care-guest-chat`,{
+     method:"POST",
+     headers:{"Content-Type":"application/json",Authorization:`Bearer ${guestSessionToken}`},
+     body:JSON.stringify({message:body,history:messages.map(item=>({sender_type:item.sender_type,body:item.body})),language:aiLanguage()})
+    });
+    let result=await response.json().catch(()=>({}));
+    if(response.status===401){
+     const renewal=await fetch(`${API_BASE}/care-guest-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+     const renewalResult=await renewal.json().catch(()=>({}));
+     if(!renewal.ok||typeof renewalResult.token!=="string"||!renewalResult.token)throw new Error(renewalResult.error||"Your guest chat could not be renewed. Your saved messages are still available here.");
+     setGuestSessionToken(renewalResult.token);
+     setNotice("Your guest chat session was renewed. Your conversation history has been kept.");
+     response=await fetch(`${API_BASE}/care-guest-chat`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Authorization:`Bearer ${renewalResult.token}`},
+      body:JSON.stringify({message:body,history:messages.map(item=>({sender_type:item.sender_type,body:item.body})),language:aiLanguage()})
+     });
+     result=await response.json().catch(()=>({}));
+    }
+    if(!response.ok)throw new Error(result.error||"Guest AI support is temporarily unavailable.");
+    if(result.mode!=="ai"||typeof result.reply!=="string")throw new Error("Guest AI support returned an invalid response.");
+    const createdAt=new Date().toISOString();
+    const userMessage={id:crypto.randomUUID(),sender_type:"customer",body,created_at:createdAt};
+    const replyMessage={id:crypto.randomUUID(),sender_type:"ai",body:result.reply,created_at:createdAt};
+    setMessages(current=>[...current,userMessage,replyMessage]);
+    if(!muted)void speakReply("",result.reply,replyMessage.id);
+    return;
+   }
    const response=await fetch(`${API_BASE}/care-chat`,{
     method:"POST",
     headers:{"Content-Type":"application/json",Authorization:`Bearer ${session.access_token}`},
@@ -170,11 +223,41 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
    }else if(result.mode==="ai"){
     setNotice("AI assistant · not a human response");
    }else throw new Error("Customer care returned an unknown response.");
-   await loadMessages(conversationId);
-   if(result.mode==="ai"&&!muted&&result.reply)void speakReply(conversationId,result.reply);
-  }catch(caught){setError(caught.message||"Your message could not be sent.");}
+   const savedMessages=await loadMessages(conversationId);
+   if(result.mode==="ai"&&!muted&&result.reply){
+    const replyMessage=savedMessages.find(item=>item.sender_type==="ai"&&item.body===result.reply);
+    void speakReply(conversationId,result.reply,replyMessage?.id);
+   }
+  }catch(caught){setText(current=>current||body);setError(caught.message||"Your message could not be sent.");}
   finally{setLoading(false)}
  };
+
+ useEffect(()=>{
+  const receiveVoiceMessage=event=>{
+   const voiceMessage=clean(event.detail?.text);
+   if(!voiceMessage)return;
+   setOpen(true);
+   if(loading){setText(voiceMessage);setNotice("Your recognized request is ready. Send it after the current response finishes.");return}
+   if(conversationId||guestSessionToken){
+    setText("");
+    void send(voiceMessage);
+    return;
+   }
+   pendingVoiceMessage.current=voiceMessage;
+   setText(voiceMessage);
+   void start();
+  };
+  addEventListener("fdd-care-voice-message",receiveVoiceMessage);
+  return()=>removeEventListener("fdd-care-voice-message",receiveVoiceMessage);
+ },[conversationId,guestSessionToken,loading,messages,muted,session?.user?.id]);
+
+ useEffect(()=>{
+  if(loading||(!conversationId&&!guestSessionToken)||!pendingVoiceMessage.current)return;
+  const voiceMessage=pendingVoiceMessage.current;
+  pendingVoiceMessage.current="";
+  setText("");
+  void send(voiceMessage);
+ },[conversationId,guestSessionToken,loading,messages,muted]);
 
  const submit=event=>{event.preventDefault();const current=text;setText("");void send(current)};
  const requestHuman=()=>void send("Please connect me with a human customer-care agent.",true);
@@ -188,8 +271,8 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   recognition.onresult=event=>{
    const transcript=String(event.results?.[0]?.[0]?.transcript||"").trim();
    if(!transcript)return;
-   setText("");
-   void send(transcript);
+   setText(transcript);
+   setNotice("Review the recognized words and edit them if needed, then press Send.");
   };
   recognition.onerror=event=>{
    const denied=event.error==="not-allowed"||event.error==="service-not-allowed";
@@ -209,8 +292,13 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   stopCurrentSpeech();
   setText("");
  };
- const speakReply=async(conversationId,message)=>{
-  try{
+ const closeCare=()=>{
+  stopVoice();
+  stopCurrentSpeech();
+  setOpen(false);
+ };
+ const speakReply=async(conversationId,message,messageId)=>{
+  if(!guestSessionToken)try{
    const response=await fetch(`${API_BASE}/care-speech`,{
     method:"POST",
     headers:{"Content-Type":"application/json",Authorization:`Bearer ${session?.access_token||""}`},
@@ -224,9 +312,10 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
    const url=URL.createObjectURL(new Blob([bytes],{type:result.mimeType||"audio/wav"}));
    const audio=new Audio(url);
    audioRef.current={audio,url};
-   audio.onended=()=>{if(audioRef.current?.audio===audio){URL.revokeObjectURL(url);audioRef.current=null;setSpeaking(false)}};
-   audio.onerror=()=>{if(audioRef.current?.audio===audio){URL.revokeObjectURL(url);audioRef.current=null;setSpeaking(false);setError("The AI voice reply could not be played.")}};
+   audio.onended=()=>{if(audioRef.current?.audio===audio){URL.revokeObjectURL(url);audioRef.current=null;setSpeaking(false);setSpeakingMessageId(null)}};
+   audio.onerror=()=>{if(audioRef.current?.audio===audio){URL.revokeObjectURL(url);audioRef.current=null;setSpeaking(false);setSpeakingMessageId(null);setError("The AI voice reply could not be played.")}};
    setSpeaking(true);
+   setSpeakingMessageId(messageId||null);
    await audio.play();
    return;
   }catch(error){
@@ -240,36 +329,48 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   utterance.rate=0.96;
   const language=aiLanguage().split("-")[0].toLowerCase();
   const voices=window.speechSynthesis.getVoices();
-  utterance.voice=voices.find(voice=>voice.lang.toLowerCase().startsWith(language)&&/natural|neural|google/i.test(voice.name))||voices.find(voice=>voice.lang.toLowerCase().startsWith(language))||null;
-  utterance.onend=()=>setSpeaking(false);
-  utterance.onerror=()=>{setSpeaking(false);setError("The spoken reply could not be played.")};
-  setSpeaking(true);window.speechSynthesis.speak(utterance);
+  const matchingVoices=voices.filter(voice=>voice.lang.toLowerCase().startsWith(language));
+  utterance.voice=matchingVoices.find(voice=>feminineVoiceNames.test(voice.name))||matchingVoices.find(voice=>/natural|neural|google/i.test(voice.name))||matchingVoices[0]||null;
+  utterance.onend=()=>{setSpeaking(false);setSpeakingMessageId(null)};
+  utterance.onerror=()=>{setSpeaking(false);setSpeakingMessageId(null);setError("The spoken reply could not be played.")};
+  setSpeaking(true);setSpeakingMessageId(messageId||null);window.speechSynthesis.speak(utterance);
  };
  const openBooking=()=>{
-  const customerMessages=messages.filter(message=>message.sender_type==="customer");
-  const request=text.trim()||customerMessages[customerMessages.length-1]?.body||"";
-  if(request)sessionStorage.setItem("fddVoiceBookingRequest",request);
+  const conversation=[...messages,...(text.trim()?[{sender_type:"customer",body:text.trim()}]:[])];
+  const request=conversation.filter(message=>message.sender_type==="customer").map(message=>message.body).join("\n");
+  if(request){
+   const details=bookingDetailsFromConversation(conversation);
+   sessionStorage.setItem("fddVoiceBookingDetails",JSON.stringify(details));
+   for(const field of ["pickup","dropoff","description","recipientName","recipientPhone"]){
+    if(details[field])dispatchEvent(new CustomEvent("fdd-voice-fill",{detail:{field,value:details[field]}}));
+   }
+   const category=details.deliverySpeed==="fast"?"fast":details.packageCategory;
+   if(["small","medium","bulky","fast"].includes(category))dispatchEvent(new CustomEvent("fdd-voice-fill",{detail:{field:"deliveryCategory",value:category}}));
+  }
+  stopVoice();
+  stopCurrentSpeech();
   history.pushState({},"","/book");
   dispatchEvent(new PopStateEvent("popstate"));
+  setOpen(false);
  };
- const startNewConversation=()=>{setConversationId(null);setConversationStatus("waiting");setMessages([]);setNotice("");setError("")};
+ const startNewConversation=()=>{setConversationId(null);setGuestSessionToken("");setConversationStatus("waiting");setMessages([]);setNotice("");setError("")};
 
  return <div className="care-widget">
-  <button className="care-launcher" aria-label={open?"Close FemmaDexCare":"Open FemmaDexCare"} aria-expanded={open} title={open?"Close FemmaDexCare":"Open FemmaDexCare"} onClick={()=>setOpen(value=>!value)}>
+  <button className="care-launcher" aria-label={open?"Close FemmaDexCare":"Open FemmaDexCare"} aria-expanded={open} title={open?"Close FemmaDexCare":"Open FemmaDexCare"} onClick={()=>open?closeCare():setOpen(true)}>
    {open?<X size={21}/>:<MessageCircle size={21}/>}
   </button>
-  {open&&<section className="care-panel" aria-label="FemmaDexCare chat">
-   <div className="care-panel-head"><div><span className="eyebrow">FEMMADEXCARE</span><b>Customer support</b><small>Automated help or an available human agent</small></div><button className="care-close" onClick={()=>setOpen(false)} aria-label="Close chat"><X size={18}/></button></div>
-   {!conversationId?<div className="care-start"><p>Ask FemmaDexCare about booking, delivery categories, approved pricing, tracking or delivery procedures. Voice is optional; you can always type.</p>{notice&&<p className="care-notice" role="status">{notice}</p>}{error&&<p className="care-error" role="alert">{error}</p>}<button className="primary wide" onClick={start} disabled={loading}>{loading?"Connecting…":session?"Start or resume private chat":"Start private chat as a guest"} <ArrowRight size={16}/></button><small>Guest chat is available without creating an account.</small></div>:<>
+  {open&&<section className="care-panel" aria-label="FemmaDexCare chat" role="dialog" aria-modal="true">
+   <div className="care-panel-head"><div><span className="eyebrow">FEMMADEXCARE</span><b>Customer support</b><small>Automated help or an available human agent</small></div><button className="care-close" onClick={closeCare} aria-label="Close chat and stop voice"><X size={18}/></button></div>
+   {!conversationId&&!guestSessionToken?<div className="care-start"><p>Hi! I’m FemmaDexCare. What would you like help with today? Ask about booking, delivery categories, tracking or delivery procedures. Voice is optional; you can always type.</p>{notice&&<p className="care-notice" role="status">{notice}</p>}{error&&<p className="care-error" role="alert">{error}</p>}<button className="primary wide" onClick={start} disabled={loading}>{loading?"Connecting…":session?"Start or resume private chat":"Start private chat as a guest"} <ArrowRight size={16}/></button><small>Guest AI chat is available without an account. A customer account is required for human support, quote requests and payments.</small></div>:<>
     <div className="care-messages" aria-live="polite">
      {!messages.length&&<p className="care-welcome">Hi! I’m FemmaDexCare. I can help you get started. For a confirmed delivery, continue through the secure booking dashboard.</p>}
-     {messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}><p>{message.body}</p><small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"You"} · {time(message.created_at)}</small>{message.sender_type==="ai"&&<button className="care-speak" onClick={()=>speakReply(conversationId,message.body)} aria-label="Speak this reply"><Volume2 size={14}/>{speaking?"Speaking":"Listen"}</button>}</article>)}
+     {messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}>{speakingMessageId===message.id?<div className="care-audio-playing" role="status" aria-label="FemmaDexCare is speaking"><span/><span/><span/><span/><small>FemmaDexCare is speaking</small></div>:<p>{message.body}</p>}<small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"You"} · {time(message.created_at)}</small>{message.sender_type==="ai"&&<button className="care-speak" onClick={()=>speakReply(conversationId,message.body,message.id)} aria-label="Speak this reply"><Volume2 size={14}/>{speakingMessageId===message.id?"Speaking":"Listen"}</button>}</article>)}
     </div>
     {notice&&<p className="care-notice" role="status">{notice}</p>}
     {error&&<p className="care-error" role="alert">{error}</p>}
-    <div className="care-actions">{conversationStatus!=="resolved"&&<button className="secondary" onClick={requestHuman} disabled={loading}><Headphones size={14}/> Contact Customer Care</button>}<button className="secondary" onClick={openBooking}><ArrowRight size={14}/> Continue booking</button>{conversationStatus==="resolved"&&<button className="primary" onClick={startNewConversation}>Start a new support chat</button>}<button className="secondary" onClick={()=>{setMuted(value=>!value);stopCurrentSpeech()}} aria-label={muted?"Unmute voice replies":"Mute voice replies"}>{muted?<VolumeX size={14}/>:<Volume2 size={14}/>} {muted?"Unmute":"Mute"}</button>{listening&&<button className="secondary" onClick={stopVoice}>Stop listening</button>}{(listening||speaking)&&<button className="secondary" onClick={cancelVoice}>Cancel voice</button>}</div>
+    <div className="care-actions">{session&&conversationId&&conversationStatus!=="resolved"&&<button className="secondary" onClick={requestHuman} disabled={loading}><Headphones size={14}/> Contact Customer Care</button>}<button className="secondary" onClick={openBooking}><ArrowRight size={14}/> Continue booking</button>{conversationStatus==="resolved"&&<button className="primary" onClick={startNewConversation}>Start a new support chat</button>}<button className="secondary" onClick={()=>{setMuted(value=>!value);stopCurrentSpeech()}} aria-label={muted?"Unmute voice replies":"Mute voice replies"}>{muted?<VolumeX size={14}/>:<Volume2 size={14}/>} {muted?"Unmute":"Mute"}</button>{listening&&<button className="secondary" onClick={stopVoice}>Stop listening</button>}{(listening||speaking)&&<button className="secondary" onClick={cancelVoice}>Cancel voice</button>}</div>
     {conversationStatus!=="resolved"&&<form className="care-form" onSubmit={submit}><button className={listening?"care-mic listening":"care-mic"} type="button" onClick={listening?stopVoice:startVoice} disabled={loading} aria-label={listening?"Stop listening":"Speak a message"}><Mic size={17}/></button><input aria-label="Message FemmaDexCare" value={text} onChange={event=>{if(listening)stopVoice();setText(event.target.value)}} maxLength={1500} placeholder={listening?"Listening… speak now":"Type or speak your request"}/><button className="primary" aria-label="Send message" disabled={loading||!text.trim()}><Send size={16}/></button></form>}
-    <small className="care-disclaimer">{loading?"FemmaDexCare is processing your message…":listening?"Listening. Review your transcript before sending.":speaking?"Speaking the reply. Use Mute or Cancel to stop.":"Voice uses browser speech recognition and speech synthesis when available. AI never submits or pays for an order."} Chat messages may be processed by the configured AI provider.</small>
+    <small className="care-disclaimer">{loading?"FemmaDexCare is processing your message…":listening?"Listening. Review your transcript before sending.":speaking?"Speaking the reply. The text appears when the audio finishes. Use Mute or Cancel to stop.":"Voice uses browser speech recognition and speech synthesis when available. AI never submits or pays for an order."} Chat messages may be processed by the configured AI provider.</small>
    </>}
   </section>}
  </div>;

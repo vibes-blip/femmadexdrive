@@ -1,11 +1,12 @@
 -- Read-only check of the core FEMADEXDRIVE schema.
--- Run after applying migrations 001 through 015 in order.
+-- Run after applying migrations 001 through 015, then 018 through 025 in order.
 with expected_objects (kind, object_name) as (
   values
     ('type', 'user_role'),
     ('type', 'rider_approval'),
     ('column', 'profiles.role'),
     ('column', 'orders.package_category'),
+    ('column', 'payments.wallet_credit'),
     ('table', 'profiles'),
     ('table', 'riders'),
     ('table', 'orders'),
@@ -20,6 +21,8 @@ with expected_objects (kind, object_name) as (
     ('table', 'dispatch_alerts'),
     ('table', 'dispatch_settings'),
     ('table', 'rider_admin_events'),
+    ('table', 'guest_support_rate_limits'),
+    ('table', 'customer_wallet_ledger'),
     ('function', 'touch_updated_at'),
     ('function', 'handle_new_user'),
     ('function', 'current_user_role'),
@@ -48,6 +51,11 @@ with expected_objects (kind, object_name) as (
     ('function', 'refresh_admin_dispatch_queue'),
     ('function', 'save_rider_document_path'),
     ('function', 'create_delivery_quote_with_category'),
+    ('function', 'consume_guest_support_rate_limit'),
+    ('function', 'record_customer_delivery_cashback'),
+    ('function', 'get_customer_wallet_balance'),
+    ('function', 'reserve_customer_delivery_payment'),
+    ('function', 'settle_customer_wallet_payment'),
     ('function', 'set_delivery_quote_vehicle'),
     ('realtime', 'rider_offers'),
     ('realtime', 'dispatch_alerts'),
@@ -59,7 +67,10 @@ with expected_objects (kind, object_name) as (
     ('rls', 'dispatch_alerts'),
     ('rls', 'dispatch_settings'),
     ('rls', 'rider_admin_events'),
+    ('rls', 'guest_support_rate_limits'),
+    ('rls', 'customer_wallet_ledger'),
     ('index', 'orders_one_active_delivery_per_rider_idx'),
+    ('index', 'customer_wallet_cashback_once_uidx'),
     ('realtime', 'orders'),
     ('realtime', 'chat_messages'),
     ('realtime', 'riders'),
@@ -111,6 +122,9 @@ select
           or (e.object_name = 'orders.package_category'
             and c.data_type = 'text'
             and c.is_nullable = 'YES')
+          or (e.object_name = 'payments.wallet_credit'
+            and c.data_type = 'numeric'
+            and c.is_nullable = 'NO')
         )
     )
     when 'table' then exists (

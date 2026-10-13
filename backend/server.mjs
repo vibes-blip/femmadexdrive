@@ -24,6 +24,8 @@ const routes = new Map([
   ["rider-location", { method: "POST", load: () => import("./netlify/functions/rider-location.mjs") }],
   ["rider-offers", { method: "POST", load: () => import("./netlify/functions/rider-offers.mjs") }],
   ["care-chat", { method: "POST", load: () => import("./netlify/functions/care-chat.mjs") }],
+  ["care-guest-session", { method: "POST", load: () => import("./netlify/functions/care-guest-session.mjs") }],
+  ["care-guest-chat", { method: "POST", load: () => import("./netlify/functions/care-guest-chat.mjs") }],
   ["care-speech", { method: "POST", load: () => import("./netlify/functions/care-speech.mjs") }],
   ["rider-wallet", { method: "POST", load: () => import("./netlify/functions/rider-wallet.mjs") }],
   ["admin-wallet", { method: "POST", load: () => import("./netlify/functions/admin-wallet.mjs") }],
@@ -53,6 +55,9 @@ async function toWebRequest(incoming, url) {
     if (Array.isArray(value)) value.forEach((item) => headers.append(name, item));
     else if (value !== undefined) headers.set(name, value);
   }
+  const forwarded = headers.get("x-forwarded-for")?.split(",").at(-1)?.trim();
+  headers.delete("x-nf-client-connection-ip");
+  headers.set("x-fdd-client-address", forwarded || incoming.socket.remoteAddress || "unknown");
   return new Request(url, {
     method: incoming.method,
     headers,
@@ -92,6 +97,8 @@ const server = createServer(async (incoming, outgoing) => {
         "/api/rider-location",
         "/api/rider-offers",
         "/api/care-chat",
+        "/api/care-guest-session",
+        "/api/care-guest-chat",
         "/api/care-speech",
         "/api/rider-wallet",
         "/api/admin-wallet",

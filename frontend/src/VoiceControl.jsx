@@ -47,11 +47,23 @@ function voiceErrorMessage(error){
 export default function VoiceControl(){
  const supportedLanguage=voiceLanguages.find(([code])=>code.toLowerCase()===String(navigator.language||"").toLowerCase())?.[0]||"en-NG";
  const [open,setOpen]=useState(false),[listening,setListening]=useState(false),[wakeEnabled,setWakeEnabled]=useState(false);
- const [message,setMessage]=useState("Enable your microphone to let FemmaDex respond when you say “FemmaDex, hi”.");
+ const [message,setMessage]=useState("Hi! I’m FemmaDex. I can help book or track a delivery. When you’re ready, allow microphone access and say “FemmaDex, hi”.");
  const [language,setLanguage]=useState(supportedLanguage),[transcript,setTranscript]=useState("");
- const recognitionRef=useRef(null),sessionRef=useRef(0),wakeEnabledRef=useRef(false),awaitingEditRef=useRef(false),restartTimerRef=useRef(null);
+ const recognitionRef=useRef(null),sessionRef=useRef(0),wakeEnabledRef=useRef(false),awaitingEditRef=useRef(false),restartTimerRef=useRef(null),sleepTimerRef=useRef(null),conversationAwakeRef=useRef(false);
  const openRef=useRef(open);
  openRef.current=open;
+ const clearSleepTimer=()=>{clearTimeout(sleepTimerRef.current);sleepTimerRef.current=null};
+ const sleepAfterSilence=(sessionId,selectedLanguage)=>{
+  clearSleepTimer();
+  sleepTimerRef.current=setTimeout(()=>{
+   if(sessionRef.current!==sessionId||!wakeEnabledRef.current)return;
+   conversationAwakeRef.current=false;
+   setOpen(false);
+   setMessage("Voice is resting after 10 seconds of silence. The microphone now listens only for “FemmaDex” and a greeting.");
+   stopRecognition();
+   scheduleWakeRestart(sessionId,selectedLanguage,250);
+  },10_000);
+ };
 
  const stopRecognition=()=>{
   clearTimeout(restartTimerRef.current);
@@ -69,6 +81,8 @@ export default function VoiceControl(){
  const stop=()=>{
   sessionRef.current+=1;
   wakeEnabledRef.current=false;
+  conversationAwakeRef.current=false;
+  clearSleepTimer();
   setWakeEnabled(false);
   awaitingEditRef.current=false;
   stopRecognition();
@@ -91,11 +105,12 @@ export default function VoiceControl(){
   recognitionRef.current=recognition;
   recognition.lang=selectedLanguage;
   recognition.continuous=true;
-  recognition.interimResults=false;
+  recognition.interimResults=true;
   recognition.maxAlternatives=4;
-  recognition.onstart=()=>{if(sessionRef.current===sessionId){setListening(true);setMessage("Wake phrase ready. Say “FemmaDex, hi” to open voice help.")}};
+  recognition.onstart=()=>{if(sessionRef.current===sessionId){setListening(true);if(!conversationAwakeRef.current)setMessage("Wake phrase ready. Say “FemmaDex, hi” to open voice help.")}};
   recognition.onresult=event=>{
    if(sessionRef.current!==sessionId)return;
+   if(conversationAwakeRef.current)sleepAfterSilence(sessionId,selectedLanguage);
    const results=Array.from(event.results||[]).slice(event.resultIndex||0).filter(result=>result.isFinal);
    for(const result of results){
     const candidates=Array.from(result).map(item=>String(item.transcript||"").trim()).filter(Boolean);
@@ -104,8 +119,10 @@ export default function VoiceControl(){
     const stopCommand=candidates.find(candidate=>voiceCommand(candidate,selectedLanguage).type==="stop");
     if(stopCommand){stop();setOpen(false);return}
     const request=wakeRequest(heard);
-    if(!openRef.current&&!request)continue;
+    if(!request&&!conversationAwakeRef.current)continue;
     if(request){
+     conversationAwakeRef.current=true;
+     clearSleepTimer();
      setOpen(true);
      if(request.text){
       awaitingEditRef.current=true;
@@ -117,10 +134,11 @@ export default function VoiceControl(){
      const greeting=voiceCommand(greetingPhrase(selectedLanguage),selectedLanguage).message;
      setMessage(greeting);
      awaitingEditRef.current=true;
-     speakMessage(greeting,selectedLanguage,()=>{awaitingEditRef.current=false;startWakeListening(sessionId,selectedLanguage)});
+     speakMessage(greeting,selectedLanguage,()=>{awaitingEditRef.current=false;sleepAfterSilence(sessionId,selectedLanguage);startWakeListening(sessionId,selectedLanguage)});
      stopRecognition();
      return;
     }
+    clearSleepTimer();
     awaitingEditRef.current=true;
     setTranscript(heard);
     setMessage("I heard this request. Edit it if needed, then tap Send voice request.");
@@ -174,6 +192,8 @@ export default function VoiceControl(){
    stream.getTracks().forEach(track=>track.stop());
    const sessionId=++sessionRef.current;
    wakeEnabledRef.current=true;
+   conversationAwakeRef.current=false;
+   clearSleepTimer();
    awaitingEditRef.current=false;
    setWakeEnabled(true);
    setOpen(false);
@@ -188,6 +208,12 @@ export default function VoiceControl(){
   const request=transcript.trim();
   const command=voiceCommand(request,language);
   if(command.type==="stop"){stop();setOpen(false);return}
+  if(command.type==="unknown"){
+   stop();
+   setOpen(false);
+   dispatchEvent(new CustomEvent("fdd-care-voice-message",{detail:{text:request}}));
+   return;
+  }
   awaitingEditRef.current=true;
   setTranscript("");
   const reply=command.type==="fill"
@@ -197,7 +223,7 @@ export default function VoiceControl(){
    :command.message;
   setMessage(reply);
   const sessionId=sessionRef.current,selectedLanguage=language;
-  const resume=()=>{awaitingEditRef.current=false;startWakeListening(sessionId,selectedLanguage)};
+  const resume=()=>{awaitingEditRef.current=false;sleepAfterSilence(sessionId,selectedLanguage);startWakeListening(sessionId,selectedLanguage)};
   if(command.type==="navigate"){
    history.pushState({},"",command.path);
    dispatchEvent(new PopStateEvent("popstate"));
@@ -217,8 +243,10 @@ export default function VoiceControl(){
   const selectedLanguage=event.target.value;
   setLanguage(selectedLanguage);
   if(!wakeEnabledRef.current)return;
+  clearSleepTimer();
   const sessionId=++sessionRef.current;
   stopRecognition();
+  if(conversationAwakeRef.current)sleepAfterSilence(sessionId,selectedLanguage);
   startWakeListening(sessionId,selectedLanguage);
  };
 
@@ -227,14 +255,14 @@ export default function VoiceControl(){
   setOpen(value=>!value);
  };
 
- useEffect(()=>()=>{sessionRef.current+=1;wakeEnabledRef.current=false;clearTimeout(restartTimerRef.current);recognitionRef.current?.stop();window.speechSynthesis?.cancel()},[]);
+ useEffect(()=>()=>{sessionRef.current+=1;wakeEnabledRef.current=false;clearTimeout(restartTimerRef.current);clearSleepTimer();recognitionRef.current?.stop();window.speechSynthesis?.cancel()},[]);
 
  return <aside className="voice-control" aria-label="Website voice control">
   {open&&<section className="voice-control-panel" aria-label="Voice control" role="region">
    <div className="voice-control-heading"><span><Volume2 size={17}/> FemmaDex voice</span><div className="voice-control-actions">
     {wakeEnabled&&<button type="button" onClick={()=>{stop();setOpen(false)}} aria-label="Stop and close voice control"><MicOff size={16}/></button>}
     <button type="button" onClick={()=>setMessage("Say “FemmaDex, hi” to wake me, then edit the recognized request before sending it.")} aria-label="Show voice help"><Navigation size={15}/></button>
-    <button type="button" onClick={()=>setOpen(false)} aria-label="Close voice panel"><X size={16}/></button>
+    <button type="button" onClick={()=>{if(wakeEnabledRef.current)stop();setOpen(false)}} aria-label={wakeEnabled?"Stop voice and close":"Close voice panel"}><X size={16}/></button>
    </div></div>
    {!wakeEnabled?<div className="voice-control-permission">
     <p role="status" aria-live="polite">{message} Your browser will ask permission before the microphone is used. Once enabled, listening stays active until you say “stop and close” or tap the stop button in this panel.</p>
