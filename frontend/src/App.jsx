@@ -7,6 +7,7 @@ import CustomerVoiceCalls from "./CustomerVoiceCalls.jsx";
 import AdminDispatchControls from "./AdminDispatchControls.jsx";
 import CustomerDispatchUpdates from "./CustomerDispatchUpdates.jsx";
 import RiderDispatch from "./RiderDispatch.jsx";
+import VoiceControl from "./VoiceControl.jsx";
 import {CarePortal,CustomerCareAdmin,CustomerCareChat} from "./CustomerCare.jsx";
 import {Address,DeliveryLocationMap,NavigationLink,geolocationErrorMessage,locationUnavailableMessage,reverseGeocode} from "./MapboxLocation.jsx";
 import {API_BASE} from "./api.js";
@@ -100,7 +101,7 @@ export default function App(){
  {page==="admin"&&(!adminHostOk?<Blocked title="Private admin host required"/>:<Admin session={session} profile={profile} open={(r,m)=>setModal({role:r,mode:m})} toast={setToast}/>)}
  {page==="admin"&&adminHostOk&&session&&["admin","supervisor"].includes(profile?.role)&&<AdminCallLogs session={session} toast={setToast}/>}
  {page==="admin"&&adminHostOk&&session&&["admin","supervisor"].includes(profile?.role)&&<CustomerCareAdmin supabase={supabase} toast={setToast}/>}
- <Footer/>{modal&&<Auth role={modal.role} mode={modal.mode} close={()=>setModal(null)} toast={setToast}/>}
+ <Footer/>{modal&&<Auth role={modal.role} mode={modal.mode} close={()=>setModal(null)} toast={setToast}/>}<VoiceControl/>
  {toast&&<div className="toast">{toast}</div>}</>
 }
 
