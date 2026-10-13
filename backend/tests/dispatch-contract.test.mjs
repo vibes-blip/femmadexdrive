@@ -45,7 +45,8 @@ test("the published package suggestions use supported dispatch vehicle categorie
 
 test("checkout requires the approved unpaid quote and sends its exact approved amount", () => {
   assert.match(paymentHandler, /quote\.status\s*!==\s*"approved"/);
-  assert.match(paymentHandler, /o\.status\s*!==\s*"approved"/);
+  assert.match(paymentHandler, /orderStatus\s*!==\s*"approved"/);
+  assert.match(paymentHandler, /prepare_approved_delivery_quote_payment/);
   assert.match(paymentHandler, /o\.payment_status\s*!==\s*"unpaid"/);
   assert.match(paymentHandler, /Number\(quote\.approved_price\)\s*!==\s*Number\(o\.final_price\)/);
   assert.match(paymentHandler, /amount:\s*Math\.round\(amountDue\s*\*\s*100\)/);

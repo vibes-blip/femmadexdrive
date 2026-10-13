@@ -60,8 +60,18 @@ export default async req=>{
       .maybeSingle();
     if(quoteError) throw quoteError;
     const isReviewedQuote=Boolean(quote);
+    let orderStatus=o.status;
     if(isReviewedQuote){
-      if(quote.status!=="approved"||o.status!=="approved"||o.payment_status!=="unpaid") {
+      if(quote.status==="approved"&&["approved","awaiting_payment"].includes(orderStatus)&&o.payment_status==="unpaid"){
+        const {data:prepared,error:prepareError}=await db.rpc("prepare_approved_delivery_quote_payment",{
+          p_order_id:o.id,
+          p_customer_id:user.id
+        });
+        if(prepareError)throw new HttpError("Could not verify the approved delivery for payment. Refresh and try again.",409);
+        if(prepared!==true)throw new HttpError("This approved delivery quote could not be verified for payment. Contact operations before retrying.",409);
+        orderStatus="approved";
+      }
+      if(quote.status!=="approved"||orderStatus!=="approved"||o.payment_status!=="unpaid") {
         throw new Error("Operations has not approved this delivery quote for payment");
       }
       if(!quote.approved_price||Number(quote.approved_price)<=0||Number(quote.approved_price)!==Number(o.final_price)) {
@@ -70,7 +80,7 @@ export default async req=>{
       if(!quote.expires_at||new Date(quote.expires_at).getTime()<=Date.now()) {
         throw new Error("This approved delivery quote has expired. Please request a new quote.");
       }
-    }else if(o.status!=="awaiting_payment"||o.payment_status!=="unpaid"){
+    }else if(orderStatus!=="awaiting_payment"||o.payment_status!=="unpaid"){
       throw new Error("Operations has not released this delivery for payment yet");
     }
     const approvedPrice=isReviewedQuote?Number(quote.approved_price):Number(o.final_price);
