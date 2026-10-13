@@ -65,8 +65,9 @@ test("provider house number and street precision are reported only when present 
 
 test("selected and edited addresses stay concise and preserve route coordinates",()=>{
  assert.match(locationUi,/houseNumberFromInput/);
- assert.match(locationUi,/Enter the full address, including building number/);
- assert.match(locationUi,/editSelectedAddress/);
+ assert.match(locationUi,/Search address or type a street and building number/);
+ assert.match(locationUi,/value=\{coordinates\?value:query\}/);
+ assert.doesNotMatch(locationUi,/address-details/);
  assert.doesNotMatch(locationUi,/Location precision:/);
  assert.doesNotMatch(locationUi,/Provider-formatted location/);
  assert.doesNotMatch(locationUi,/Provider result type/);
@@ -93,6 +94,6 @@ test("existing autocomplete debounce, mobile suggestions, and pin coordinate han
  assert.match(locationUi,/controller\.abort\(\)/);
  assert.match(locationUi,/setSelectedPoint\(\{lat:point\.lat,lng:point\.lng\}\)/);
  assert.match(locationUi,/setLngLat\(\[point\.lng,point\.lat\]\)/);
- assert.match(read("../../frontend/src/styles.css"),/@media\(max-width:520px\)\{\.address-details/);
+ assert.doesNotMatch(read("../../frontend/src/styles.css"),/address-details/);
  assert.match(read("../../frontend/src/styles.css"),/overflow-wrap:anywhere/);
 });

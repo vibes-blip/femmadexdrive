@@ -74,7 +74,6 @@ export function Address({label,value,onChange,onSelect,coordinates}){
  const [results,setResults]=useState([]);
  const [recent,setRecent]=useRecentLocations();
  const [query,setQuery]=useState(value||"");
- const [confirmedAddress,setConfirmedAddress]=useState("");
  const [near,setNear]=useState(null);
  const [searching,setSearching]=useState(false);
  const [nearbyBusy,setNearbyBusy]=useState(false);
@@ -85,10 +84,6 @@ export function Address({label,value,onChange,onSelect,coordinates}){
  const [mapOpen,setMapOpen]=useState(false);
  const selectionVersion=useRef(0);
  const selectionBusy=useRef(false);
-
- useEffect(()=>{
-  if(!coordinates&&value&&!query)setQuery(value);
- },[coordinates,value,query]);
 
  useEffect(()=>{
   const searchText=query.trim();
@@ -143,7 +138,6 @@ export function Address({label,value,onChange,onSelect,coordinates}){
     ?providerAddress
     :addressWithHouseNumber(providerAddress,customerHouseNumber,providerHouseNumber);
    const addressVerification={address:providerAddress,precision,provider:point.provider||reversed.provider,resultType:point.resultType||reversed.resultType,providerHouseNumber,customerHouseNumber,originalInput};
-   setConfirmedAddress(address);
    onSelect(address,{lat:selected.lat,lng:selected.lng});
    setRecent(current=>{
     const next=[{...selected,customerHouseNumber},...current.filter(item=>item.address!==selected.address||item.customerHouseNumber!==customerHouseNumber)].slice(0,6);
@@ -174,13 +168,7 @@ export function Address({label,value,onChange,onSelect,coordinates}){
   selectionBusy.current=false;
   setSelecting(false);
   setQuery(nextValue);
-  setConfirmedAddress("");
   onChange(nextValue);
- };
-
- const editSelectedAddress=nextAddress=>{
-  setConfirmedAddress(nextAddress);
-  onSelect(nextAddress,{lat:Number(coordinates.lat),lng:Number(coordinates.lng)});
  };
 
  const searchNearby=()=>{
@@ -214,7 +202,7 @@ export function Address({label,value,onChange,onSelect,coordinates}){
   <div className="address-field">
    <label htmlFor={inputId}>{label}</label>
    <div className="address"><MapPin size={17}/>
-    <input id={inputId} required={!coordinates} value={query} onFocus={()=>setFocused(true)} onBlur={()=>setTimeout(()=>setFocused(false),160)} onChange={event=>changeAddress(event.target.value)} placeholder="Type a street, place or landmark"/>
+    <input id={inputId} required={!coordinates} value={coordinates?value:query} onFocus={()=>setFocused(true)} onBlur={()=>setTimeout(()=>setFocused(false),160)} onChange={event=>changeAddress(event.target.value)} placeholder="Search address or type a street and building number"/>
     <button type="button" aria-label="Use current location" onClick={useCurrentLocation} disabled={locating||selecting}>{locating?<span className="spinner small"/>:<LocateFixed size={16}/>}</button>
     <button type="button" aria-label="Choose location on map" onClick={()=>setMapOpen(true)}><Navigation size={16}/></button>
    </div>
@@ -228,9 +216,6 @@ export function Address({label,value,onChange,onSelect,coordinates}){
    {focused&&!query.trim()&&!near&&recent.length>0&&<div className="address-suggestions recent-locations" role="listbox" aria-label="Recent locations"><small>Recent locations</small>{recent.map((point,index)=><button key={`${point.lat}-${point.lng}-${index}`} type="button" role="option" onMouseDown={event=>event.preventDefault()} onClick={()=>choose(point)}><Clock3 size={15}/><span><b>{point.title||point.address}</b><small>{point.address}</small></span></button>)}</div>}
    {focused&&!query.trim()&&!near&&recent.length===0&&<small className="address-hint">Type to search addresses, choose a recent location, or search near you.</small>}
   </div>
-  {coordinates&&<div className="address-details">
-   <label>{label}<input value={confirmedAddress||value} maxLength="1000" onChange={event=>editSelectedAddress(event.target.value)} placeholder="Enter the full address, including building number"/></label>
-  </div>}
   {mapOpen&&<LocationPicker initialCoordinates={coordinates} onClose={()=>setMapOpen(false)} onSelect={choose}/>}
  </>;
 }
