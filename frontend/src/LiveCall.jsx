@@ -41,7 +41,15 @@ export default function LiveCall({ orderId, session, supabase, peerName = "deliv
 
   const joinRoom = async ({ serverUrl, token }) => {
     await disconnectRoom();
-    const room = new Room({ adaptiveStream: true, dynacast: true });
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      audioCaptureDefaults: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
     roomRef.current = room;
     room.on(RoomEvent.TrackSubscribed, (track) => {
       if (track.kind !== "audio" || !mediaRef.current) return;

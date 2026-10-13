@@ -3,13 +3,13 @@ import {sendAdmin} from "./notify.mjs";
 
 const DEFAULT_SYSTEM_PROMPT=`You are FemmaDexCare, FemmaDexDrive's customer-support assistant.
 Help customers understand dispatch booking, delivery categories, delivery stages, customer-care support and the published failed-delivery terms.
-For a booking conversation, guide the customer to identify pickup, destination, parcel category, package details and recipient, one step at a time. The customer must review and enter all details in the existing authenticated booking dashboard at https://femmadexdrive.netlify.app/book.
-Small & Medium Parcels include documents, phones, clothes, shoes, groceries and small packages, with standard pricing and regular delivery. Large & Bulky Items include furniture, appliances and large or heavy boxes; a suitable vehicle is required and the booking is subject to approval. Fast Delivery is for urgent small and medium parcels, costs 2x standard price under the existing quote rules, and has a 2-hour target after rider acceptance, not a guarantee.
+For a booking conversation, guide the customer to identify pickup, destination, parcel category, package details and recipient, one step at a time. The customer can book without creating an account at https://femmadexdrive.netlify.app/book.
+Small & Medium Parcels include documents, phones, clothes, shoes, groceries and small packages, with standard pricing and regular delivery. Large & Bulky Items include furniture, appliances and large or heavy boxes; the preliminary route price is 4x standard and a suitable vehicle is required. Fast Delivery is for urgent small and medium parcels, costs 2x the standard price and has a 2-hour target after rider acceptance, not a guarantee.
 The route-based quote and Operations-approved price in the dashboard are authoritative; do not invent ordinary prices or ETAs.
 If discussing a recipient-unavailable redelivery, explain that the proposed published policy is 45% of the original dispatch price as the total redelivery charge, subject to Operations confirmation.
 Keep replies concise and friendly.`;
-const REQUIRED_AI_BOUNDARIES=`Mandatory service boundaries: Never create, claim to create, cancel, price, pay for, or modify an order. Never claim a payment succeeded, issue a refund, or promise a rider. Ask customers to complete all orders through https://femmadexdrive.netlify.app/book. Do not provide legal, safety-critical, or medical advice. Never pretend to be a human.`;
-const SERVICE_KNOWLEDGE=`FemmaDexDrive service facts: Small & Medium Parcels cover documents, phones, clothes, shoes, groceries and small packages; standard pricing and regular delivery. Large & Bulky Items cover furniture, appliances and large or heavy boxes; a suitable vehicle is required and dispatch is subject to approval. Fast Delivery is for urgent small and medium parcels, costs 2x the standard price under the existing quote rules, and has a 2-hour target after rider acceptance, not a guarantee. For conversational booking help, ask for pickup, destination, parcel category, item details and recipient one step at a time, then direct the customer to confirm them in the existing booking dashboard. The route-based quote and Operations-approved price in the dashboard are authoritative; never invent prices, order status, rider availability or payment results.`;
+const REQUIRED_AI_BOUNDARIES=`Mandatory service boundaries: Never create, claim to create, cancel, price, pay for, or modify an order. Never claim a payment succeeded, issue a refund, or promise a rider. Direct customers to the booking form at https://femmadexdrive.netlify.app/book; it supports guest booking. Do not provide legal, safety-critical, or medical advice. Never pretend to be a human.`;
+const SERVICE_KNOWLEDGE=`FemmaDexDrive service facts: Small & Medium Parcels cover documents, phones, clothes, shoes, groceries and small packages; standard pricing and regular delivery. Large & Bulky Items cost 4x the standard route price and require a suitable vehicle and Operations approval. Fast Delivery is for urgent small and medium parcels, costs 2x the standard price and has a 2-hour target after rider acceptance, not a guarantee. For conversational booking help, ask for pickup, destination, parcel category, item details and recipient one step at a time, then direct the customer to confirm them in the booking form. The route-based quote and Operations-approved price in the dashboard are authoritative; never invent prices, order status, rider availability or payment results.`;
 
 const cleanMessage=value=>typeof value==="string"?value.trim().slice(0,1500):"";
 const safeReply=value=>typeof value==="string"?value.trim().slice(0,2000):"";
@@ -61,12 +61,43 @@ export default async req=>{
   const user=await userFromRequest(req);
   const request=await body(req);
   const message=cleanMessage(request?.message);
-  if(!message)throw new HttpError("Enter a message before sending.",400);
-  if(typeof request?.conversationId!=="string")throw new HttpError("Start a support conversation before sending a message.",400);
+  const transferConversationId=request?.transferConversationId;
+  const transferringConversation=typeof transferConversationId==="string";
+  if(!transferringConversation&&!message)throw new HttpError("Enter a message before sending.",400);
+  if(!transferringConversation&&typeof request?.conversationId!=="string")throw new HttpError("Start a support conversation before sending a message.",400);
   const db=sb();
   const {data:profile,error:profileError}=await db.from("profiles").select("role").eq("id",user.id).maybeSingle();
   if(profileError)throw new HttpError("Your account could not be verified. Please try again.",503);
   if(profile?.role!=="customer")throw new HttpError("A customer account is required to use AI customer care.",403);
+
+  if(transferringConversation){
+   const previousAccessToken=typeof request.previousAccessToken==="string"?request.previousAccessToken.trim():"";
+   if(!previousAccessToken)throw new HttpError("The previous guest session could not be verified. Your support history was not changed.",400);
+   let previousSession;
+   try{previousSession=await db.auth.getUser(previousAccessToken)}
+   catch{throw new HttpError("The previous guest session could not be verified. Your support history was not changed.",401)}
+   const guestUser=previousSession.data?.user;
+   if(previousSession.error||!guestUser||guestUser.is_anonymous!==true||guestUser.id===user.id){
+    throw new HttpError("The previous guest session could not be verified. Your support history was not changed.",401);
+   }
+   const {data:guestConversation,error:guestConversationError}=await db.from("support_conversations")
+    .select("id,status")
+    .eq("id",transferConversationId)
+    .eq("customer_id",guestUser.id)
+    .maybeSingle();
+   if(guestConversationError)throw new HttpError("Could not load your previous support conversation.",503);
+   if(!guestConversation||guestConversation.status==="closed")throw new HttpError("The previous support conversation is unavailable or closed. Its history was not changed.",404);
+   const {data:movedConversation,error:moveError}=await db.from("support_conversations")
+    .update({customer_id:user.id})
+    .eq("id",guestConversation.id)
+    .eq("customer_id",guestUser.id)
+    .neq("status","closed")
+    .select("id")
+    .maybeSingle();
+   if(moveError)throw new HttpError("Could not attach your previous support conversation to this account.",503);
+   if(!movedConversation)throw new HttpError("The support conversation changed before it could be attached. Its history was not changed.",409);
+   return json({mode:"transferred",conversationId:movedConversation.id});
+  }
 
   const {data:conversation,error:conversationError}=await db.from("support_conversations")
    .select("id,customer_id,assigned_agent_id,handled_by,status,support_status,human_requested_at")

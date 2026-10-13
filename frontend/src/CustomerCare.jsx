@@ -5,6 +5,7 @@ import {API_BASE} from "./api.js";
 const clean=value=>String(value||"").replace(/[<>]/g,"").trim();
 const time=value=>value?new Date(value).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"";
 const aiLanguage=()=>navigator.language||"en";
+const CARE_CONVERSATION_KEY="fddCareConversation";
 
 function speechRecognition(){
  if(typeof window==="undefined")return null;
@@ -15,7 +16,16 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
  const [open,setOpen]=useState(false),[loading,setLoading]=useState(false),[conversationId,setConversationId]=useState(null),[conversationStatus,setConversationStatus]=useState("waiting");
  const [messages,setMessages]=useState([]),[text,setText]=useState(""),[notice,setNotice]=useState(""),[error,setError]=useState("");
  const [listening,setListening]=useState(false),[speaking,setSpeaking]=useState(false),[muted,setMuted]=useState(false);
- const recognitionRef=useRef(null);
+ const recognitionRef=useRef(null),audioRef=useRef(null),careMemoryRestored=useRef(false),skipCareMemorySave=useRef(false);
+ const stopCurrentSpeech=()=>{
+  window.speechSynthesis?.cancel();
+  const active=audioRef.current;
+  audioRef.current=null;
+  if(active){active.audio.pause();active.audio.src="";URL.revokeObjectURL(active.url)}
+  setSpeaking(false);
+ };
+
+ useEffect(()=>()=>{recognitionRef.current?.stop();stopCurrentSpeech()},[]);
 
  useEffect(()=>{
   const show=()=>setOpen(true);
@@ -23,22 +33,75 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   return()=>removeEventListener("fdd-open-care",show);
  },[]);
 
+ useEffect(()=>{
+  const restore=()=>{
+   if(!session)return;
+   try{
+    const saved=JSON.parse(sessionStorage.getItem(CARE_CONVERSATION_KEY)||"null");
+    if(!saved||saved.ownerId!==session.user.id||typeof saved.conversationId!=="string")return;
+    setConversationId(saved.conversationId);
+    setConversationStatus(saved.conversationStatus||"waiting");
+    setMessages(Array.isArray(saved.messages)?saved.messages:[]);
+    setText(saved.draftText||"");
+    setNotice(saved.notice||"");
+    setOpen(true);
+    if(saved.memoryTransferError)setError(`Your previous AI chat is still visible, but could not be reconnected: ${saved.memoryTransferError}`);
+    skipCareMemorySave.current=true;
+   }catch(caught){setError(`Your saved FemmaDexCare history could not be restored: ${caught.message}`)}
+   finally{careMemoryRestored.current=true}
+  };
+  const updated=()=>restore();
+  restore();
+  addEventListener("fdd-care-memory-updated",updated);
+  return()=>removeEventListener("fdd-care-memory-updated",updated);
+ },[session?.user?.id]);
+
+ useEffect(()=>{
+  if(!careMemoryRestored.current)return;
+  if(skipCareMemorySave.current){skipCareMemorySave.current=false;return}
+  try{
+   if(!conversationId){sessionStorage.removeItem(CARE_CONVERSATION_KEY);return}
+   sessionStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify({
+    ownerId:session?.user?.id||null,
+    conversationId,
+    conversationStatus,
+    messages,
+    draftText:text,
+    notice
+   }));
+  }catch(caught){setError(`Your FemmaDexCare history could not be saved on this device: ${caught.message}`)}
+ },[session?.user?.id,conversationId,conversationStatus,messages,text,notice]);
+
  const loadMessages=async id=>{
   const {data,error:loadError}=await supabase.from("support_messages").select("id,sender_type,body,created_at")
    .eq("conversation_id",id).order("created_at",{ascending:true}).limit(100);
   if(loadError)throw new Error(`Could not load support messages: ${loadError.message}`);
   setMessages(data||[]);
+  return data||[];
  };
 
+ useEffect(()=>{
+  if(!session||!conversationId)return;
+  let active=true;
+  loadMessages(conversationId).catch(caught=>{if(active)setError(caught.message)});
+  return()=>{active=false};
+ },[session?.user?.id,conversationId]);
+
  const start=async()=>{
-  if(!session){openAuth?.("customer","login");setNotice("Sign in to start your private AI support chat.");return}
   if(loading)return;
   if(!supabase){setError("Customer care is unavailable because the account service is not configured.");return}
   setLoading(true);setError("");
   try{
+   let activeSession=session;
+   if(!activeSession){
+    const {data,error:authError}=await supabase.auth.signInAnonymously();
+    if(authError)throw new Error(`Guest support is unavailable: ${authError.message}. Enable anonymous sign-ins in Supabase or sign in to continue.`);
+    activeSession=data.session;
+   }
+   if(!activeSession)throw new Error("Could not create a private customer-care session.");
    const {data:existing,error:existingError}=await supabase.from("support_conversations")
     .select("id,support_status,human_requested_at")
-    .eq("customer_id",session.user.id)
+    .eq("customer_id",activeSession.user.id)
     .neq("support_status","resolved")
     .order("updated_at",{ascending:false})
     .limit(1)
@@ -61,7 +124,16 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
    }
    setConversationId(id);
    setNotice("");
-   await loadMessages(id);
+   const loadedMessages=await loadMessages(id);
+   sessionStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify({
+    ownerId:activeSession.user.id,
+    conversationId:id,
+    conversationStatus:existing?.support_status||"waiting",
+    messages:loadedMessages,
+    draftText:text,
+    notice:""
+   }));
+   dispatchEvent(new Event("fdd-care-memory-updated"));
   }catch(caught){setError(caught.message||"Could not start customer care.")}
   finally{setLoading(false)}
  };
@@ -99,7 +171,7 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
     setNotice("AI assistant · not a human response");
    }else throw new Error("Customer care returned an unknown response.");
    await loadMessages(conversationId);
-   if(result.mode==="ai"&&!muted&&result.reply)speakReply(result.reply);
+   if(result.mode==="ai"&&!muted&&result.reply)void speakReply(conversationId,result.reply);
   }catch(caught){setError(caught.message||"Your message could not be sent.");}
   finally{setLoading(false)}
  };
@@ -113,7 +185,12 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   recognitionRef.current=recognition;
   recognition.lang=aiLanguage();
   recognition.interimResults=false;
-  recognition.onresult=event=>setText(current=>`${current}${current?" ":""}${event.results?.[0]?.[0]?.transcript||""}`);
+  recognition.onresult=event=>{
+   const transcript=String(event.results?.[0]?.[0]?.transcript||"").trim();
+   if(!transcript)return;
+   setText("");
+   void send(transcript);
+  };
   recognition.onerror=event=>{
    const denied=event.error==="not-allowed"||event.error==="service-not-allowed";
    setError(denied?"Microphone access was denied. Allow microphone access in your browser, or type your message instead.":"Voice input was unavailable. Check microphone permission or type your message.");
@@ -129,15 +206,41 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
  };
  const cancelVoice=()=>{
   stopVoice();
-  window.speechSynthesis?.cancel();
-  setSpeaking(false);
+  stopCurrentSpeech();
   setText("");
  };
- const speakReply=message=>{
+ const speakReply=async(conversationId,message)=>{
+  try{
+   const response=await fetch(`${API_BASE}/care-speech`,{
+    method:"POST",
+    headers:{"Content-Type":"application/json",Authorization:`Bearer ${session?.access_token||""}`},
+    body:JSON.stringify({conversationId,message})
+   });
+   const result=await response.json().catch(()=>({}));
+   if(!response.ok)throw new Error(result.error||"Gemini speech generation is unavailable.");
+   if(typeof result.audioBase64!=="string"||!result.audioBase64)throw new Error("Gemini returned no speech audio.");
+   stopCurrentSpeech();
+   const bytes=Uint8Array.from(atob(result.audioBase64),character=>character.charCodeAt(0));
+   const url=URL.createObjectURL(new Blob([bytes],{type:result.mimeType||"audio/wav"}));
+   const audio=new Audio(url);
+   audioRef.current={audio,url};
+   audio.onended=()=>{if(audioRef.current?.audio===audio){URL.revokeObjectURL(url);audioRef.current=null;setSpeaking(false)}};
+   audio.onerror=()=>{if(audioRef.current?.audio===audio){URL.revokeObjectURL(url);audioRef.current=null;setSpeaking(false);setError("The AI voice reply could not be played.")}};
+   setSpeaking(true);
+   await audio.play();
+   return;
+  }catch(error){
+   stopCurrentSpeech();
+   setNotice("Gemini voice is unavailable right now; using the most natural voice available in your browser.");
+  }
   if(!window.speechSynthesis||!window.SpeechSynthesisUtterance){setError("Spoken replies are not supported by this browser.");return}
   window.speechSynthesis.cancel();
   const utterance=new SpeechSynthesisUtterance(message);
   utterance.lang=aiLanguage();
+  utterance.rate=0.96;
+  const language=aiLanguage().split("-")[0].toLowerCase();
+  const voices=window.speechSynthesis.getVoices();
+  utterance.voice=voices.find(voice=>voice.lang.toLowerCase().startsWith(language)&&/natural|neural|google/i.test(voice.name))||voices.find(voice=>voice.lang.toLowerCase().startsWith(language))||null;
   utterance.onend=()=>setSpeaking(false);
   utterance.onerror=()=>{setSpeaking(false);setError("The spoken reply could not be played.")};
   setSpeaking(true);window.speechSynthesis.speak(utterance);
@@ -153,18 +256,18 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
 
  return <div className="care-widget">
   <button className="care-launcher" aria-label={open?"Close FemmaDexCare":"Open FemmaDexCare"} onClick={()=>setOpen(value=>!value)}>
-   {open?<X size={21}/>:<MessageCircle size={21}/>}<span>FemmaDexCare</span>
+   {open?<X size={21}/>:<MessageCircle size={21}/>}<span className="care-call-particles" aria-hidden="true"><i/><i/><i/></span><span>FemmaDexCare</span>
   </button>
   {open&&<section className="care-panel" aria-label="FemmaDexCare chat">
    <div className="care-panel-head"><div><span className="eyebrow">FEMMADEXCARE</span><b>Customer support</b><small>Automated help or an available human agent</small></div><button className="care-close" onClick={()=>setOpen(false)} aria-label="Close chat"><X size={18}/></button></div>
-   {!conversationId?<div className="care-start"><p>Ask FemmaDexCare about booking, delivery categories, approved pricing, tracking or delivery procedures. Voice is optional; you can always type.</p>{notice&&<p className="care-notice" role="status">{notice}</p>}{error&&<p className="care-error" role="alert">{error}</p>}<button className="primary wide" onClick={start} disabled={loading}>{loading?"Connecting…":session?"Start or resume private chat":"Sign in to start private chat"} <ArrowRight size={16}/></button></div>:<>
+   {!conversationId?<div className="care-start"><p>Ask FemmaDexCare about booking, delivery categories, approved pricing, tracking or delivery procedures. Voice is optional; you can always type.</p>{notice&&<p className="care-notice" role="status">{notice}</p>}{error&&<p className="care-error" role="alert">{error}</p>}<button className="primary wide" onClick={start} disabled={loading}>{loading?"Connecting…":session?"Start or resume private chat":"Start private chat as a guest"} <ArrowRight size={16}/></button><small>Guest chat is available without creating an account.</small></div>:<>
     <div className="care-messages" aria-live="polite">
      {!messages.length&&<p className="care-welcome">Hi! I’m FemmaDexCare. I can help you get started. For a confirmed delivery, continue through the secure booking dashboard.</p>}
-     {messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}><p>{message.body}</p><small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"You"} · {time(message.created_at)}</small>{message.sender_type==="ai"&&<button className="care-speak" onClick={()=>speakReply(message.body)} aria-label="Speak this reply"><Volume2 size={14}/>{speaking?"Speaking":"Listen"}</button>}</article>)}
+     {messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}><p>{message.body}</p><small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"You"} · {time(message.created_at)}</small>{message.sender_type==="ai"&&<button className="care-speak" onClick={()=>speakReply(conversationId,message.body)} aria-label="Speak this reply"><Volume2 size={14}/>{speaking?"Speaking":"Listen"}</button>}</article>)}
     </div>
     {notice&&<p className="care-notice" role="status">{notice}</p>}
     {error&&<p className="care-error" role="alert">{error}</p>}
-    <div className="care-actions">{conversationStatus!=="resolved"&&<button className="secondary" onClick={requestHuman} disabled={loading}><Headphones size={14}/> Contact Customer Care</button>}<button className="secondary" onClick={openBooking}><ArrowRight size={14}/> Continue booking</button>{conversationStatus==="resolved"&&<button className="primary" onClick={startNewConversation}>Start a new support chat</button>}<button className="secondary" onClick={()=>{setMuted(value=>!value);window.speechSynthesis?.cancel();setSpeaking(false)}} aria-label={muted?"Unmute voice replies":"Mute voice replies"}>{muted?<VolumeX size={14}/>:<Volume2 size={14}/>} {muted?"Unmute":"Mute"}</button>{listening&&<button className="secondary" onClick={stopVoice}>Stop listening</button>}{(listening||speaking)&&<button className="secondary" onClick={cancelVoice}>Cancel voice</button>}</div>
+    <div className="care-actions">{conversationStatus!=="resolved"&&<button className="secondary" onClick={requestHuman} disabled={loading}><Headphones size={14}/> Contact Customer Care</button>}<button className="secondary" onClick={openBooking}><ArrowRight size={14}/> Continue booking</button>{conversationStatus==="resolved"&&<button className="primary" onClick={startNewConversation}>Start a new support chat</button>}<button className="secondary" onClick={()=>{setMuted(value=>!value);stopCurrentSpeech()}} aria-label={muted?"Unmute voice replies":"Mute voice replies"}>{muted?<VolumeX size={14}/>:<Volume2 size={14}/>} {muted?"Unmute":"Mute"}</button>{listening&&<button className="secondary" onClick={stopVoice}>Stop listening</button>}{(listening||speaking)&&<button className="secondary" onClick={cancelVoice}>Cancel voice</button>}</div>
     {conversationStatus!=="resolved"&&<form className="care-form" onSubmit={submit}><button className={listening?"care-mic listening":"care-mic"} type="button" onClick={listening?stopVoice:startVoice} disabled={loading} aria-label={listening?"Stop listening":"Speak a message"}><Mic size={17}/></button><input aria-label="Message FemmaDexCare" value={text} onChange={event=>{if(listening)stopVoice();setText(event.target.value)}} maxLength={1500} placeholder={listening?"Listening… speak now":"Type or speak your request"}/><button className="primary" aria-label="Send message" disabled={loading||!text.trim()}><Send size={16}/></button></form>}
     <small className="care-disclaimer">{loading?"FemmaDexCare is processing your message…":listening?"Listening. Review your transcript before sending.":speaking?"Speaking the reply. Use Mute or Cancel to stop.":"Voice uses browser speech recognition and speech synthesis when available. AI never submits or pays for an order."} Chat messages may be processed by the configured AI provider.</small>
    </>}
@@ -319,7 +422,7 @@ function AdminSupportInbox({supabase,toast}){
   else{toast("Support request resolved.");setSelected(null);await load()}
   setLoading(false);
  };
- return <section className="panel care-applications"><span className="eyebrow">CUSTOMER CARE</span><h2>Support requests</h2><p>Review each request and choose when to accept it. AI replies do not count as human responses.</p><div className="care-inbox"><div className="care-thread-list">{requests.length?requests.map(request=><button key={request.id} className={selected?.id===request.id?"care-thread selected":"care-thread"} onClick={()=>setSelected(request)}><b>{request.support_status}{request.needs_attention?" · Needs attention":""}</b><small>{request.id.slice(0,8)} · {new Date(request.updated_at).toLocaleString()}</small></button>):<p>No open support requests.</p>}</div><div className="care-thread-view">{selected?<><p className="care-request-status">{loadingMessages?"Loading conversation…":`Customer: ${customer?.full_name||customer?.email||selected.customer_id}`}<br/>Status: {selected.support_status}{selected.needs_attention?" · Awaiting attention":""}</p>{selected.support_status==="waiting"&&<button className="primary" onClick={accept} disabled={loading}>Accept support request</button>}{loadingMessages?<p role="status">Loading messages…</p>:<div className="care-messages">{messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}><p>{message.body}</p><small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"Customer"} · {time(message.created_at)}</small></article>)}</div>}{selected.support_status!=="waiting"&&<><form className="care-form" onSubmit={send}><input aria-label="Customer-care reply" value={draft} onChange={event=>setDraft(event.target.value)} maxLength={2000} placeholder="Reply to customer"/><button className="primary" disabled={loading||!draft.trim()}><Send size={16}/> Send</button></form><button className="secondary" onClick={resolve} disabled={loading}>Resolve support request</button></>}</>:<p>Select a support request to load its conversation. No request is opened or assigned automatically.</p>}</div></div></section>;
+ return <section className="panel care-applications" id="admin-support"><span className="eyebrow">CUSTOMER CARE</span><h2>Support requests</h2><p>Review each request and choose when to accept it. AI replies do not count as human responses.</p><div className="care-inbox"><div className="care-thread-list">{requests.length?requests.map(request=><button key={request.id} className={selected?.id===request.id?"care-thread selected":"care-thread"} onClick={()=>setSelected(request)}><b>{request.support_status}{request.needs_attention?" · Needs attention":""}</b><small>{request.id.slice(0,8)} · {new Date(request.updated_at).toLocaleString()}</small></button>):<p>No open support requests.</p>}</div><div className="care-thread-view">{selected?<><p className="care-request-status">{loadingMessages?"Loading conversation…":`Customer: ${customer?.full_name||customer?.email||selected.customer_id}`}<br/>Status: {selected.support_status}{selected.needs_attention?" · Awaiting attention":""}</p>{selected.support_status==="waiting"&&<button className="primary" onClick={accept} disabled={loading}>Accept support request</button>}{loadingMessages?<p role="status">Loading messages…</p>:<div className="care-messages">{messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}><p>{message.body}</p><small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"Customer"} · {time(message.created_at)}</small></article>)}</div>}{selected.support_status!=="waiting"&&<><form className="care-form" onSubmit={send}><input aria-label="Customer-care reply" value={draft} onChange={event=>setDraft(event.target.value)} maxLength={2000} placeholder="Reply to customer"/><button className="primary" disabled={loading||!draft.trim()}><Send size={16}/> Send</button></form><button className="secondary" onClick={resolve} disabled={loading}>Resolve support request</button></>}</>:<p>Select a support request to load its conversation. No request is opened or assigned automatically.</p>}</div></div></section>;
 }
 
 export function CustomerCareAdmin({supabase,toast}){

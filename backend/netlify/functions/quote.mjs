@@ -33,6 +33,17 @@ export default async req=>{
    throw new HttpError("Your account could not be verified. Please try again.",503);
   }
   if(profile?.role!=="customer")throw new HttpError("A customer account is required to request a delivery quote.",403);
+  if(!user.email){
+   const customerEmail=String(request.customerEmail||"").trim().toLowerCase();
+   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)||customerEmail.length>254){
+    throw new HttpError("Enter a valid email address so Paystack can send your payment receipt.",400);
+   }
+   const {error:emailError}=await db.from("profiles").update({email:customerEmail}).eq("id",user.id);
+   if(emailError){
+    console.error("Could not save guest customer email",{code:emailError.code,message:emailError.message});
+    throw new HttpError("Could not save your contact email. Please try again.",503);
+   }
+  }
   const {data:termsAcceptance,error:termsError}=await db.from("delivery_terms_acceptances").insert({
    customer_id:user.id,
    terms_version:DISPATCH_TERMS_VERSION
@@ -124,8 +135,9 @@ export default async req=>{
   }
 
   const distanceKm=distanceMeters/1000;
-  const standardSuggestedPrice=calculateSuggestedPrice(distanceMeters,packageSize);
-  const suggestedPrice=calculatePriceForDeliverySpeed(standardSuggestedPrice,deliverySpeed);
+  const standardSuggestedPrice=calculateSuggestedPrice(distanceMeters,"small");
+  const categoryPrice=packageCategory==="bulky"?calculateSuggestedPrice(distanceMeters,"large"):standardSuggestedPrice;
+  const suggestedPrice=calculatePriceForDeliverySpeed(categoryPrice,deliverySpeed);
   const {data:order,error}=await db.rpc("create_delivery_quote_with_options",{
    p_customer_id:user.id,
    p_pickup_address:pickupAddress,
@@ -180,7 +192,7 @@ export default async req=>{
    deliverySpeed,
    standardSuggestedPrice,
    suggestedPrice,
-   priceMultiplier:deliverySpeed==="fast"?2:1,
+   priceMultiplier:packageCategory==="bulky"?4:deliverySpeed==="fast"?2:1,
    deliveryDeadlineHours:deliverySpeed==="fast"?2:null,
    currency:"NGN"
   });

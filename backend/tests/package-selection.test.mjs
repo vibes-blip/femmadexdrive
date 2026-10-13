@@ -51,23 +51,28 @@ test("rejects invalid category, measurements and missing route distance", () => 
   assert.throws(() => calculateSuggestedPrice(1000, "unknown"), /valid package size/);
 });
 
-test("package size changes only the suggested quote amount", () => {
-  assert.equal(calculateSuggestedPrice(5000, "small"), 2000);
-  assert.equal(calculateSuggestedPrice(5000, "medium"), 2500);
-  assert.equal(calculateSuggestedPrice(5000, "large"), 3000);
+test("standard parcel prices have a ₦3,000 minimum and scale by road distance", () => {
+  assert.equal(calculateSuggestedPrice(1200, "small"), 3000);
+  assert.equal(calculateSuggestedPrice(5000, "medium"), 3000);
+  assert.equal(calculateSuggestedPrice(10000, "small"), 3750);
 });
 
-test("original route pricing and package adjustments remain unchanged", () => {
-  assert.equal(calculateSuggestedPrice(10000, "small"), 2250);
-  assert.equal(calculateSuggestedPrice(10000, "medium"), 2750);
-  assert.equal(calculateSuggestedPrice(10000, "large"), 3250);
-  assert.equal(calculateSuggestedPrice(1000, "small"), 2000);
+test("large and bulky delivery prices are four times the standard route price", () => {
+  assert.equal(calculateSuggestedPrice(1200, "large"), 12000);
+  assert.equal(calculateSuggestedPrice(10000, "very_large"), 15000);
 });
 
 test("fast delivery doubles the standard quote without adding a flat surcharge", () => {
-  assert.equal(calculatePriceForDeliverySpeed(2000, "standard"), 2000);
-  assert.equal(calculatePriceForDeliverySpeed(2500, "fast"), 5000);
-  assert.equal(calculatePriceForDeliverySpeed(2750, "fast"), 5500);
+  assert.equal(calculatePriceForDeliverySpeed(3000, "standard"), 3000);
+  assert.equal(calculatePriceForDeliverySpeed(3000, "fast"), 6000);
+  assert.equal(calculatePriceForDeliverySpeed(3750, "fast"), 7500);
   assert.throws(() => calculatePriceForDeliverySpeed(-1, "fast"), /standard delivery price/);
   assert.throws(() => calculatePriceForDeliverySpeed(2000, "priority"), /valid delivery speed/);
+});
+
+test("1.2 km examples match the published standard, bulky and fast prices", () => {
+  const standard = calculateSuggestedPrice(1200, "small");
+  assert.equal(standard, 3000);
+  assert.equal(calculateSuggestedPrice(1200, "large"), 12000);
+  assert.equal(calculatePriceForDeliverySpeed(standard, "fast"), 6000);
 });

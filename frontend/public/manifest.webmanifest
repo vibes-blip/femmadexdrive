@@ -5,5 +5,13 @@
   "display":"standalone",
   "background_color":"#09090b",
   "theme_color":"#10b981",
-  "description":"Fast goods pickup and doorstep delivery in Lagos with FemmaDexDrive riders."
+  "description":"Fast goods pickup and doorstep delivery in Lagos with FemmaDexDrive riders.",
+  "icons":[
+    {
+      "src":"/images/Logo-mark.png",
+      "sizes":"331x331",
+      "type":"image/png",
+      "purpose":"any"
+    }
+  ]
 }

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import {json,err} from "./_lib.mjs";
+import {sb,json,err} from "./_lib.mjs";
 import {markPayment,verifyReference} from "./create-paystack-payment.mjs";
 
 export default async req=>{
@@ -13,6 +13,21 @@ export default async req=>{
     if(a.length!==b.length||!crypto.timingSafeEqual(a,b)) return new Response(JSON.stringify({ok:false}),{status:401,headers:{"Content-Type":"application/json"}});
     const payload=JSON.parse(raw||"{}");
     if(payload.event==="charge.success") await markPayment(payload.data);
+    if(["transfer.success","transfer.failed","transfer.reversed"].includes(payload.event)){
+      const transferStatus={
+        "transfer.success":"success",
+        "transfer.failed":"failed",
+        "transfer.reversed":"reversed"
+      }[payload.event];
+      const {data:updated,error}=await sb().rpc("set_rider_wallet_withdrawal_status",{
+        p_reference:String(payload.data?.reference||""),
+        p_status:transferStatus,
+        p_transfer_code:payload.data?.transfer_code||null,
+        p_status_message:payload.data?.reason||null
+      });
+      if(error)throw error;
+      if(!updated)console.warn("Paystack transfer webhook did not match a rider-wallet withdrawal",{reference:payload.data?.reference,event:payload.event});
+    }
     return json({ok:true});
   }catch(e){return err(e)}
 };

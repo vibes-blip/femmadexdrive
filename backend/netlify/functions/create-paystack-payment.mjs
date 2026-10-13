@@ -42,6 +42,10 @@ export default async req=>{
     const user=await userFromRequest(req), b=await body(req), db=sb();
     const {data:o,error}=await db.from("orders").select("id,tracking_number,customer_id,final_price,status,payment_status").eq("id",b.orderId).eq("customer_id",user.id).maybeSingle();
     if(error||!o) throw new Error("Delivery not found");
+    const {data:customerProfile,error:customerProfileError}=await db.from("profiles").select("email").eq("id",user.id).maybeSingle();
+    if(customerProfileError)throw new Error("Could not retrieve the customer email for Paystack.");
+    const paymentEmail=user.email||customerProfile?.email;
+    if(!paymentEmail)throw new HttpError("Add a valid contact email before starting secure payment.",400);
     const {data:quote,error:quoteError}=await db.from("delivery_quote_reviews")
       .select("approved_price,status,expires_at")
       .eq("order_id",o.id)
@@ -103,7 +107,7 @@ export default async req=>{
         method:"POST",
         body:JSON.stringify({
           amount:Math.round(approvedPrice*100),
-          email:user.email,
+          email:paymentEmail,
           currency:"NGN",
           reference,
           callback_url:new URL("/api/paystack-callback",origin).href,

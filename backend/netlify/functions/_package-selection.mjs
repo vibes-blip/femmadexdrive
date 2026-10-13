@@ -80,8 +80,8 @@ export function calculateSuggestedPrice(distanceMeters, packageSize) {
   }
   const distanceKm = distanceMeters / 1000;
   const distanceCharge = Math.max(0, distanceKm - 5) * 150;
-  const packageAdjustment = packageSize === "small" ? 0 : packageSize === "medium" ? 500 : 1000;
-  return Math.max(2000, Math.round(1500 + distanceCharge)) + packageAdjustment;
+  const standardPrice = Math.max(3000, Math.round(3000 + distanceCharge));
+  return ["large", "very_large"].includes(packageSize) ? standardPrice * 4 : standardPrice;
 }
 
 export function calculatePriceForDeliverySpeed(standardPrice, deliverySpeed = "standard") {

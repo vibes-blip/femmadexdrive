@@ -121,7 +121,7 @@ export default function AdminDispatchControls({supabase,session,profile,orders,r
  const setRiderStatus=(id,status)=>run("set_rider_approval_status",{p_rider_id:id,p_status:status},`Rider status changed to ${status}.`);
  const resolveAlert=id=>run("acknowledge_dispatch_alert",{p_alert_id:id},"Dispatch alert acknowledged.");
 
- return <section className="panel admin-dispatch">
+ return <section className="panel admin-dispatch" id="admin-dispatch">
   <div className="panel-head"><div><span className="eyebrow">LIVE DISPATCH CONTROL</span><h2>Matching alerts and interventions</h2></div><button className="secondary" onClick={()=>{refresh();load()}}><RefreshCw size={15}/> Refresh</button></div>
   <div className="metrics">
    <div className="metric"><b>{orders.filter(order=>order.payment_status==="paid"&&!order.rider_id&&!terminal.has(order.status)).length}</b><span>Paid and awaiting rider</span></div>

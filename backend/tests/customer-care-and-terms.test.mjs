@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
+import {voiceCommand} from "../../frontend/src/voiceCommands.js";
 
 const read=path=>readFileSync(new URL(path,import.meta.url),"utf8");
 const careMigration=read("../supabase/migrations/020_customer_care.sql");
@@ -12,6 +13,8 @@ const apiServer=read("../server.mjs");
 const bookingUi=read("../../frontend/src/App.jsx");
 const locationUi=read("../../frontend/src/MapboxLocation.jsx");
 const careUi=read("../../frontend/src/CustomerCare.jsx");
+const voiceUi=read("../../frontend/src/VoiceControl.jsx");
+const voiceCommands=read("../../frontend/src/voiceCommands.js");
 const termsUi=read("../../frontend/src/App.jsx");
 const paystack=read("../netlify/functions/create-paystack-payment.mjs");
 const homepageStyles=read("../../frontend/src/home.css");
@@ -31,11 +34,16 @@ test("AI responses are server-configured, authenticated and cannot create or pay
  assert.match(careHandler,/CARE_AI_API_KEY/);
  assert.match(careHandler,/CARE_AI_MODEL/);
  assert.match(careHandler,/userFromRequest/);
+ assert.match(careHandler,/transferConversationId/);
+ assert.match(careHandler,/guestUser\.is_anonymous!==true/);
+ assert.match(careHandler,/Could not attach your previous support conversation to this account/);
  assert.match(careHandler,/A customer account is required/);
  assert.match(careHandler,/Mandatory service boundaries: Never create, claim to create, cancel, price, pay for, or modify an order/);
  assert.doesNotMatch(careHandler,/create-paystack-payment|create_delivery_quote|orders'\)\.insert/);
  assert.match(apiServer,/\["care-chat", \{ method: "POST"/);
  assert.match(careUi,/fddVoiceBookingRequest/);
+ assert.match(careUi,/fddCareConversation/);
+ assert.match(bookingUi,/transferGuestCareMemory/);
  assert.match(careUi,/never submits or pays for an order/);
  assert.match(careUi,/Review your transcript before sending/);
  assert.match(careUi,/Microphone access was denied/);
@@ -43,17 +51,72 @@ test("AI responses are server-configured, authenticated and cannot create or pay
  assert.match(careUi,/Mute voice replies/);
 });
 
-test("homepage makes booking and AI help prominent without changing delivery identifiers or prices",()=>{
+test("homepage makes booking and AI help prominent and shows the current delivery categories",()=>{
  assert.match(bookingUi,/Book a Delivery/);
  assert.match(bookingUi,/Talk to AI/);
  assert.match(bookingUi,/Become a Rider/);
  assert.match(bookingUi,/Track a Package/);
- assert.match(bookingUi,/id:"small-medium",title:"Small & Medium Parcels",description:"Documents, phones, clothes, shoes, groceries and small packages\."/);
+ assert.match(bookingUi,/signInAnonymously/);
+ assert.match(bookingUi,/Contact email \(for your Paystack receipt\)/);
+ assert.match(bookingUi,/src="\/images\/Logo-mark\.png"/);
+ assert.match(bookingUi,/className="page admin-dashboard"/);
+ assert.match(bookingUi,/className="admin-quick-nav"/);
+ assert.match(bookingUi,/aria-expanded=\{menu\}/);
+ assert.doesNotMatch(bookingUi,/className="logo">FD/);
+ assert.doesNotMatch(bookingUi,/double[- ]tap|onDoubleClick/i);
+ assert.match(bookingUi,/id:"small-medium",title:"Small & Medium Parcel",description:"Documents, phones, clothes, shoes, groceries and small packages\."/);
  assert.match(bookingUi,/id:"bulky",title:"Large & Bulky Items",description:"Furniture, appliances and large or heavy boxes\."/);
  assert.match(bookingUi,/id:"fast",title:"Fast Delivery — Within 2 Hours"/);
  assert.match(bookingUi,/2-hour target after rider acceptance/);
+ assert.match(bookingUi,/Book without creating an account/);
+ assert.match(bookingUi,/import VoiceControl from "\.\/VoiceControl\.jsx"/);
+ assert.match(bookingUi,/<VoiceControl\/>/);
+ assert.match(bookingUi,/fdd-voice-fill/);
+ assert.match(voiceUi,/window\.SpeechRecognition\|\|window\.webkitSpeechRecognition/);
+ assert.match(voiceCommands,/recipient.*name/);
+ assert.match(voiceCommands,/deliveryCategory/);
+ assert.match(voiceCommands,/\/book/);
+ assert.match(voiceCommands,/\/track/);
+ assert.match(voiceUi,/Choose a map suggestion to confirm its location/);
+ assert.match(voiceUi,/const welcomeMessage="Welcome to FemmaDex/);
+ assert.match(voiceUi,/convenient parcel delivery, delivery tracking, and helpful FemmaDexCare support/);
+ assert.match(voiceUi,/two-hour target after a rider accepts it/);
+ assert.match(voiceUi,/setMessage\(welcomeMessage\)/);
+ assert.match(voiceUi,/createUtterance\(welcomeMessage,synthesis\)/);
+ assert.match(voiceUi,/feminineVoiceNames/);
+ assert.match(voiceUi,/utterance\.onend=\(\)=>startRecognition\(Recognition,sessionId\)/);
+ assert.match(voiceUi,/recognition\.maxAlternatives=4/);
+ assert.match(voiceUi,/speakMessage\(reply\)/);
+ assert.match(voiceUi,/feminine voice when available/);
+ assert.doesNotMatch(voiceUi,/getQuote|create-paystack-payment|\.submit\(/);
+ assert.match(careUi,/Start private chat as a guest/);
+ assert.match(careUi,/speakReply\(conversationId,message\.body\)/);
  assert.match(homepageStyles,/prefers-reduced-motion:reduce/);
  assert.match(homepageStyles,/max-width:420px/);
+});
+
+test("voice commands understand natural phrasing, transcription variations and explain available services",()=>{
+ assert.deepEqual(voiceCommand("I need help bookin a delivery"),{
+  type:"navigate",
+  path:"/book",
+  message:"I’ll open the delivery booking form. I can help fill in the details, and you’ll review and confirm the booking yourself."
+ });
+ assert.equal(voiceCommand("where's my pacel").path,"/track");
+ assert.deepEqual(voiceCommand("Please set pickup address to 14 Allen Avenue"),{
+  type:"fill",
+  field:"pickup",
+  value:"14 Allen Avenue"
+ });
+ assert.deepEqual(voiceCommand("please make my delivery fast"),{
+  type:"fill",
+  field:"deliveryCategory",
+  value:"fast"
+ });
+ assert.match(voiceCommand("what services do you offer").message,/small and medium parcel delivery/);
+ assert.match(voiceCommand("can you help me").message,/small and medium parcel delivery/);
+ assert.match(voiceCommand("what is the weather tomorrow").message,/I can help you book a delivery/);
+ assert.equal(voiceCommand("join as a rider").path,"/rider");
+ assert.equal(voiceCommand("home").path,"/");
 });
 
 test("human support is persistent, manually accepted, private and escalated after one minute",()=>{

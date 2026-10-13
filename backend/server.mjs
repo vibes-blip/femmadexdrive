@@ -24,6 +24,9 @@ const routes = new Map([
   ["rider-location", { method: "POST", load: () => import("./netlify/functions/rider-location.mjs") }],
   ["rider-offers", { method: "POST", load: () => import("./netlify/functions/rider-offers.mjs") }],
   ["care-chat", { method: "POST", load: () => import("./netlify/functions/care-chat.mjs") }],
+  ["care-speech", { method: "POST", load: () => import("./netlify/functions/care-speech.mjs") }],
+  ["rider-wallet", { method: "POST", load: () => import("./netlify/functions/rider-wallet.mjs") }],
+  ["admin-wallet", { method: "POST", load: () => import("./netlify/functions/admin-wallet.mjs") }],
 ]);
 
 function corsHeaders(origin) {
@@ -89,6 +92,9 @@ const server = createServer(async (incoming, outgoing) => {
         "/api/rider-location",
         "/api/rider-offers",
         "/api/care-chat",
+        "/api/care-speech",
+        "/api/rider-wallet",
+        "/api/admin-wallet",
       ],
     }));
     return;
