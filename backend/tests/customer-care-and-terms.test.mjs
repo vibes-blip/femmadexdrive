@@ -62,6 +62,11 @@ test("homepage makes booking and AI help prominent and shows the current deliver
  assert.match(apiServer,/\["care-guest-chat", \{ method: "POST"/);
  assert.match(careUi,/care-guest-session/);
  assert.match(careUi,/care-guest-chat/);
+ assert.match(careUi,/AI is unavailable\. Your message and automatic reply are saved in this browser/);
+ assert.match(careUi,/customer care was notified to follow up here/);
+ assert.match(careUi,/care-quick-replies/);
+ assert.match(read("../../frontend/src/customer-care-chat.css"),/\.care-widget \.care-panel\{position:absolute/);
+ assert.doesNotMatch(read("../../frontend/src/customer-care-chat.css"),/\.care-panel\{position:fixed;inset:0/);
  assert.match(bookingUi,/Your delivery draft is saved on this device/);
  assert.match(bookingUi,/Contact email \(for your Paystack receipt\)/);
  assert.match(bookingUi,/src="\/images\/Logo-mark\.png"/);
@@ -89,6 +94,10 @@ test("homepage makes booking and AI help prominent and shows the current deliver
  assert.match(voiceUi,/sleepAfterSilence/);
  assert.match(voiceUi,/10_000/);
  assert.match(voiceUi,/getUserMedia\(\{audio:true\}\)/);
+ assert.match(voiceUi,/VOICE_GREETING_KEY/);
+ assert.match(voiceUi,/Tap Allow microphone, then say “FemmaDex, hi”/);
+ assert.match(bookingUi,/storage:authStorage\(\)/);
+ assert.match(bookingUi,/window\.localStorage\.removeItem\(`sb-\$\{projectRef\}-auth-token`\)/);
  assert.match(voiceUi,/Heard request — edit before sending/);
  assert.match(voiceUi,/recognition\.maxAlternatives=4/);
  assert.match(voiceUi,/speakMessage\(reply,selectedLanguage,resume\)/);
@@ -153,11 +162,14 @@ test("admin dashboard lists AI and human chats and supports direct replies",()=>
  assert.match(adminChatMigration,/human_requested_at = coalesce\(human_requested_at, now\(\)\)/);
  assert.match(careUi,/export function AdminSupportInbox/);
  assert.match(careUi,/Accept chat and reply/);
- assert.match(careUi,/Type your reply to the customer/);
+ assert.match(careUi,/Select a suggested reply or type a custom reply/);
+ assert.match(careUi,/care-quick-replies/);
  assert.match(careUi,/\.or\(`support_status\.eq\.waiting,handled_by\.eq\.\$\{session\.user\.id\}`\)/);
  assert.match(bookingUi,/<AdminSupportInbox supabase=\{supabase\} session=\{session\} toast=\{toast\}\/>/);
  assert.match(careUi,/localStorage\.setItem\(CARE_CONVERSATION_KEY/);
  assert.match(careUi,/localStorage\.getItem\(CARE_CONVERSATION_KEY\)/);
+ assert.match(careUi,/if\(!belongsToCustomer&&!\(isGuestSession&&!session\)\)/);
+ assert.match(careUi,/setMessages\(\[\]\);[\s\S]*localStorage\.removeItem\(CARE_CONVERSATION_KEY\)/);
  assert.match(bookingUi,/localStorage\.getItem\("fddCareConversation"\)/);
 });
 

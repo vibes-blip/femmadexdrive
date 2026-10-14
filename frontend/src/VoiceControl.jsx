@@ -4,6 +4,7 @@ import {greetingPhrase,voiceCommand,wakeRequest} from "./voiceCommands.js";
 import "./voice-control.css";
 
 const feminineVoiceNames=/female|woman|zira|samantha|susan|karen|tessa|victoria|ava|salli|joanna|aria|jenny|natasha|linda|moira|fiona|serena|allison|emma|amy|olivia|google uk english female/i;
+const VOICE_GREETING_KEY="fddVoiceGreetingSeen";
 const voiceLanguages=[
  ["en-NG","English (Nigeria)"],["en-US","English (US)"],["yo-NG","Yoruba"],["ha-NG","Hausa"],["ig-NG","Igbo"],
  ["fr-FR","French"],["es-ES","Spanish"],["ar-SA","Arabic"],["pt-PT","Portuguese"],["sw-KE","Swahili"]
@@ -46,12 +47,16 @@ function voiceErrorMessage(error){
 
 export default function VoiceControl(){
  const supportedLanguage=voiceLanguages.find(([code])=>code.toLowerCase()===String(navigator.language||"").toLowerCase())?.[0]||"en-NG";
- const [open,setOpen]=useState(false),[listening,setListening]=useState(false),[wakeEnabled,setWakeEnabled]=useState(false);
- const [message,setMessage]=useState("Hi! I’m FemmaDex. I can help book or track a delivery. When you’re ready, allow microphone access and say “FemmaDex, hi”.");
+ const [open,setOpen]=useState(()=>{try{return !localStorage.getItem(VOICE_GREETING_KEY)}catch{return true}}),[listening,setListening]=useState(false),[wakeEnabled,setWakeEnabled]=useState(false);
+ const [message,setMessage]=useState("Hi! I’m FemmaDex. Need help? Tap Allow microphone, then say “FemmaDex, hi” and I’ll wake up. You can always type instead.");
  const [language,setLanguage]=useState(supportedLanguage),[transcript,setTranscript]=useState("");
  const recognitionRef=useRef(null),sessionRef=useRef(0),wakeEnabledRef=useRef(false),awaitingEditRef=useRef(false),restartTimerRef=useRef(null),sleepTimerRef=useRef(null),conversationAwakeRef=useRef(false);
  const openRef=useRef(open);
  openRef.current=open;
+ useEffect(()=>{
+  if(!open)return;
+  try{localStorage.setItem(VOICE_GREETING_KEY,"1")}catch{setMessage("Welcome! I’m FemmaDex. Tap Allow microphone, then say “FemmaDex, hi” if you need help. You can always type instead. This greeting may appear again if browser storage is unavailable.")}
+ },[open]);
  const clearSleepTimer=()=>{clearTimeout(sleepTimerRef.current);sleepTimerRef.current=null};
  const sleepAfterSilence=(sessionId,selectedLanguage)=>{
   clearSleepTimer();

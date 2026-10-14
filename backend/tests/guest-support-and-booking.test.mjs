@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createGuestCareToken,guestCareRateLimitHash,verifyGuestCareToken} from "../netlify/functions/_guest-care-security.mjs";
+import {createGuestCareSessionHandler} from "../netlify/functions/care-guest-session.mjs";
+import {AI_UNAVAILABLE_REPLY,createAiReplyResult} from "../netlify/functions/care-chat.mjs";
+import {HttpError} from "../netlify/functions/_lib.mjs";
 import {bookingDetailsFromConversation} from "../../frontend/src/bookingAssistant.js";
 import {readFileSync} from "node:fs";
 
@@ -23,6 +26,40 @@ test("guest care rate-limit keys are keyed hashes rather than raw client identif
  assert.equal(first,guestCareRateLimitHash("ip:203.0.113.5",secret));
  assert.notEqual(first,guestCareRateLimitHash("ip:203.0.113.6",secret));
  assert.notEqual(first,guestCareRateLimitHash("ip:203.0.113.5","rotated-secret"));
+});
+
+test("guest chat session creation checks the rate-limit result it actually receives",async()=>{
+ const sessionId="2af3b685-6188-4f7c-9ae3-10893b23f912";
+ const handler=createGuestCareSessionHandler({
+  getSecret:()=>"test-only-secret",
+  makeSessionId:()=>sessionId,
+  getDb:()=>({rpc:async()=>({data:true,error:null})})
+ });
+ const response=await handler(new Request("https://femmadexdrive.test/api/care-guest-session",{method:"POST"}));
+ assert.equal(response.status,200);
+ const result=await response.json();
+ assert.deepEqual(verifyGuestCareToken(result.token,"test-only-secret"),{
+  sessionId,
+  expiresAt:result.expiresAt
+ });
+
+ const limited=createGuestCareSessionHandler({
+  getSecret:()=>"test-only-secret",
+  getDb:()=>({rpc:async()=>({data:false,error:null})})
+ });
+ const limitedResponse=await limited(new Request("https://femmadexdrive.test/api/care-guest-session",{method:"POST"}));
+ assert.equal(limitedResponse.status,429);
+});
+
+test("AI service outages produce a saved fallback and trigger customer-care follow-up",async()=>{
+ const result=await createAiReplyResult([{sender_type:"customer",body:"Where is my delivery?"}],"en-NG",async()=>{
+  throw new HttpError("AI provider unavailable.",503);
+ });
+ assert.deepEqual(result,{reply:AI_UNAVAILABLE_REPLY,fallback:true});
+ await assert.rejects(createAiReplyResult([],"en-NG",async()=>{throw new Error("unexpected failure")}),/unexpected failure/);
+ const careHandler=read("../netlify/functions/care-chat.mjs");
+ assert.match(careHandler,/support_status:"waiting",human_requested_at:updatedAt,needs_attention:true/);
+ assert.match(careHandler,/sender_type:"ai",body:reply/);
 });
 
 test("booking assistant extracts delivery details from multiple customer messages",()=>{

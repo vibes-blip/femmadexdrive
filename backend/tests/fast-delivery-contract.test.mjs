@@ -13,7 +13,7 @@ test("fast quote pricing doubles the current standard quote", async () => {
   const {calculatePriceForDeliverySpeed, calculateSuggestedPrice} =
     await import("../netlify/functions/_package-selection.mjs");
   const standard = calculateSuggestedPrice(10000, "medium");
-  assert.equal(standard, 3750);
+  assert.equal(standard, 2250);
   assert.equal(calculatePriceForDeliverySpeed(standard, "standard"), standard);
   assert.equal(calculatePriceForDeliverySpeed(standard, "fast"), standard * 2);
   assert.match(quoteHandler, /deliverySpeed=request\.deliverySpeed===undefined\?"standard":request\.deliverySpeed/);

@@ -2,7 +2,7 @@ import React,{useCallback,useEffect,useId,useRef,useState} from "react";
 import * as maplibregl from "maplibre-gl";
 import {Clock3,LocateFixed,MapPin,Navigation,Search,X} from "lucide-react";
 import {apiUrl} from "./api.js";
-import {addressWithHouseNumber,houseNumberFromInput} from "./address-format.js";
+import {houseNumberFromInput,preserveCustomerAddress} from "./address-format.js";
 
 const OSM_STYLE={
  version:8,
@@ -119,7 +119,7 @@ export function Address({label,value,onChange,onSelect,coordinates}){
   };
  },[query,near]);
 
- const choose=async point=>{
+ const choose=async(point,customerInput=query)=>{
   if(selectionBusy.current)return false;
   selectionBusy.current=true;
   const version=++selectionVersion.current;
@@ -128,16 +128,13 @@ export function Address({label,value,onChange,onSelect,coordinates}){
   try{
    const reversed=await reverseGeocode(point.lat,point.lng);
    if(version!==selectionVersion.current)return false;
-   const originalInput=query.trim();
+   const originalInput=String(customerInput||point.customerAddress||query||"").trim();
    const providerAddress=String(point.address||reversed.address).trim();
    const providerHouseNumber=point.houseNumber||(point.precision?"":reversed.houseNumber)||"";
    const customerHouseNumber=houseNumberFromInput(originalInput)||point.customerHouseNumber||providerHouseNumber;
    const precision=point.precision||reversed.precision||"place";
-   const selected={...reversed,address:providerAddress,title:point.title||reversed.title,details:point.details||reversed.details,provider:point.provider||reversed.provider,resultType:point.resultType||reversed.resultType,houseNumber:providerHouseNumber,customerHouseNumber,precision};
-   const address=precision==="building"&&providerHouseNumber&&!originalInput
-    ?providerAddress
-    :addressWithHouseNumber(providerAddress,customerHouseNumber,providerHouseNumber);
-   const addressVerification={address:providerAddress,precision,provider:point.provider||reversed.provider,resultType:point.resultType||reversed.resultType,providerHouseNumber,customerHouseNumber,originalInput};
+   const address=preserveCustomerAddress(providerAddress,originalInput,customerHouseNumber,providerHouseNumber);
+   const selected={...reversed,address:providerAddress,title:point.title||reversed.title,details:point.details||reversed.details,provider:point.provider||reversed.provider,resultType:point.resultType||reversed.resultType,houseNumber:providerHouseNumber,customerHouseNumber,customerAddress:originalInput,precision};
    onSelect(address,{lat:selected.lat,lng:selected.lng});
    setRecent(current=>{
     const next=[{...selected,customerHouseNumber},...current.filter(item=>item.address!==selected.address||item.customerHouseNumber!==customerHouseNumber)].slice(0,6);
@@ -369,7 +366,7 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
   setLoading(true);
   setError("");
   try{
-   const verified=await onSelect(selectedPoint);
+   const verified=await onSelect(selectedPoint,query.trim());
    if(verified===false){
     setError("The selected coordinates remain on the map, but the address could not be verified. Retry address verification or move the pin.");
     return;

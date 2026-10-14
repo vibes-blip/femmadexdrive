@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import addressSearch,{formatAddress} from "../netlify/functions/address-search.mjs";
-import {addressWithHouseNumber,houseNumberFromInput} from "../../frontend/src/address-format.js";
+import {addressWithHouseNumber,houseNumberFromInput,preserveCustomerAddress} from "../../frontend/src/address-format.js";
 
 const read=path=>readFileSync(new URL(path,import.meta.url),"utf8");
 const locationUi=read("../../frontend/src/MapboxLocation.jsx");
@@ -61,10 +61,15 @@ test("provider house number and street precision are reported only when present 
  assert.equal(addressWithHouseNumber("Awoseyin Street, Lagos","43"),"43, Awoseyin Street, Lagos");
  assert.equal(addressWithHouseNumber("43 Awoseyin Street, Lagos","43","43"),"43, Awoseyin Street, Lagos");
  assert.equal(addressWithHouseNumber("43 Awoseyin Street, Lagos","45","43"),"45, Awoseyin Street, Lagos");
+ assert.equal(preserveCustomerAddress("43 Awoseyin Street, Lagos","43, Awo","43","43"),"43, Awoseyin Street, Lagos");
+ assert.equal(preserveCustomerAddress("43 Awoseyin Street, Lagos","Flat 4B, 43 Awoseyin Street","43","43"),"43, Awoseyin Street, Lagos (Flat 4B, 43 Awoseyin Street)");
+ assert.equal(preserveCustomerAddress("Awoseyin Street, Lagos","Awoseyin Street",""),"Awoseyin Street, Lagos");
 });
 
 test("selected and edited addresses stay concise and preserve route coordinates",()=>{
  assert.match(locationUi,/houseNumberFromInput/);
+ assert.match(locationUi,/preserveCustomerAddress\(providerAddress,originalInput/);
+ assert.match(locationUi,/onSelect\(selectedPoint,query\.trim\(\)\)/);
  assert.match(locationUi,/Search address or type a street and building number/);
  assert.match(locationUi,/value=\{coordinates\?value:query\}/);
  assert.doesNotMatch(locationUi,/address-details/);

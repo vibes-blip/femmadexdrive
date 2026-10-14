@@ -1,4 +1,4 @@
-import {sb,userFromRequest,body,json,err,HttpError} from "./_lib.mjs";
+import {sb,userWithProfileRole,body,json,err,HttpError} from "./_lib.mjs";
 
 async function paystack(path,options={}){
  if(!process.env.PAYSTACK_SECRET_KEY)throw new HttpError("Paystack transfers are not configured on the server.",503);
@@ -25,10 +25,9 @@ async function paystack(path,options={}){
 export default async req=>{
  if(req.method==="OPTIONS")return new Response("",{status:204});
  try{
-  const user=await userFromRequest(req),request=await body(req),db=sb();
-  const {data:profile,error:profileError}=await db.from("profiles").select("role").eq("id",user.id).maybeSingle();
-  if(profileError)throw new HttpError("Could not verify your Operations account.",503);
-  if(profile?.role!=="admin")throw new HttpError("Administrator access is required to manage Paystack wallet payouts.",403);
+  const db=sb();
+  await userWithProfileRole(req,["admin"],db);
+  const request=await body(req);
 
   if(request?.action==="list"){
    const {data:withdrawals,error}=await db.from("rider_wallet_withdrawals")

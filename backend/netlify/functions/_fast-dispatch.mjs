@@ -2,12 +2,24 @@ const activeStatuses = ["accepted", "picked_up", "on_the_way", "at_door", "deliv
 const routeCheckFreshMs = 120_000;
 const locationFreshMs = 120_000;
 const directionsUrl = "https://api.openrouteservice.org/v2/directions/driving-car/geojson";
+const queryPageSize = 1000;
 
 const validPoint = (lat, lng) =>
   lat !== null && lat !== undefined && lat !== "" &&
   lng !== null && lng !== undefined && lng !== "" &&
   Number.isFinite(Number(lat)) && Number(lat) >= -90 && Number(lat) <= 90 &&
   Number.isFinite(Number(lng)) && Number(lng) >= -180 && Number(lng) <= 180;
+
+export async function readAllRows(query) {
+  const rows = [];
+  for (let offset = 0; ; offset += queryPageSize) {
+    const {data, error} = await query.range(offset, offset + queryPageSize - 1);
+    if (error) return {data: null, error};
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < queryPageSize) return {data: rows, error: null};
+  }
+}
 
 export function compatibleVehicle(riderVehicle, orderVehicle) {
   const rider = String(riderVehicle || "").trim().toLowerCase();
@@ -90,23 +102,23 @@ export async function refreshFastOfferRouteChecks(
   const checkedAt = new Date(now).toISOString();
   const [{data:offers,error:offerError},{data:orders,error:orderError},{data:riders,error:riderError},{data:settings,error:settingsError}] =
     await Promise.all([
-      db.from("rider_offers")
+      readAllRows(db.from("rider_offers")
         .select("id,order_id,rider_id,route_check_status,pickup_eta_minutes,route_checked_at")
         .eq("status", "offered")
         .order("offered_at", {ascending: true})
-        .limit(1000),
-      db.from("orders")
+        .order("id", {ascending: true})),
+      readAllRows(db.from("orders")
         .select("id,tracking_number,vehicle_type,pickup_latitude,pickup_longitude,status,payment_status,rider_id,delivery_speed")
         .eq("delivery_speed", "fast")
         .eq("payment_status", "paid")
         .in("status", ["paid", "searching"])
         .is("rider_id", null)
-        .limit(200),
-      db.from("riders")
+        .order("id", {ascending: true})),
+      readAllRows(db.from("riders")
         .select("id,vehicle_type,is_online,approval_status,lat,lng,last_seen_at")
         .eq("approval_status", "approved")
         .eq("is_online", true)
-        .limit(1000),
+        .order("id", {ascending: true})),
       db.from("delivery_service_rules")
         .select("pickup_deadline_minutes")
         .eq("delivery_speed", "fast")

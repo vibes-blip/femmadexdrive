@@ -10,6 +10,7 @@ If discussing a recipient-unavailable redelivery, explain that the proposed publ
 Keep replies concise and friendly.`;
 const REQUIRED_AI_BOUNDARIES=`Mandatory service boundaries: Never create, claim to create, cancel, price, pay for, or modify an order. Never claim a payment succeeded, issue a refund, or promise a rider. Direct customers to the booking form at https://femmadexdrive.netlify.app/book; guests can prepare a draft, then must sign in or create an account to request a quote or pay. Do not provide legal, safety-critical, or medical advice. Never pretend to be a human.`;
 const SERVICE_KNOWLEDGE=`FemmaDexDrive service facts: Small & Medium Parcels cover documents, phones, clothes, shoes, groceries and small packages; standard pricing and regular delivery. Large & Bulky Items cost 4x the standard route price and require a suitable vehicle and Operations approval. Fast Delivery is for urgent small and medium parcels, costs 2x the standard price and has a 2-hour target after rider acceptance, not a guarantee. For conversational booking help, ask for pickup, destination, parcel category, item details and recipient one step at a time, then direct the customer to prepare them in the booking form. The guest draft is saved on the device; signing in is required to request a quote, create a dispatch, or pay. The route-based quote and Operations-approved price in the dashboard are authoritative; never invent prices, order status, rider availability or payment results.`;
+export const AI_UNAVAILABLE_REPLY="The AI assistant is temporarily unavailable. You can continue with the booking page for delivery requests, or leave your message here and check back for a reply.";
 
 const cleanMessage=value=>typeof value==="string"?value.trim().slice(0,1500):"";
 const safeReply=value=>typeof value==="string"?value.trim().slice(0,2000):"";
@@ -53,6 +54,14 @@ export async function createAiReply(messages,language){
  const reply=safeReply(result?.choices?.[0]?.message?.content);
  if(!reply)throw new HttpError("AI customer care could not form a response. Please try again or ask for a human agent.",502);
  return reply;
+}
+
+export async function createAiReplyResult(messages,language,replyWithAi=createAiReply){
+ try{return {reply:await replyWithAi(messages,language),fallback:false}}
+ catch(error){
+  if(error instanceof HttpError&&[502,503].includes(error.status))return {reply:AI_UNAVAILABLE_REPLY,fallback:true};
+  throw error;
+ }
 }
 
 export default async req=>{
@@ -184,17 +193,21 @@ export default async req=>{
    .limit(11);
   if(historyError)throw new HttpError("Could not load the support conversation history.",503);
   const messages=[...(history||[]).reverse(),{sender_type:"customer",body:message}];
-  const reply=await createAiReply(messages,request.language);
+  const aiResult=await createAiReplyResult(messages,request.language);
+  const reply=aiResult.reply;
   const {error:writeError}=await db.from("support_messages").insert([
    {conversation_id:conversation.id,sender_id:user.id,sender_type:"customer",body:message},
    {conversation_id:conversation.id,sender_id:null,sender_type:"ai",body:reply}
   ]);
   if(writeError)throw new HttpError("The AI response was prepared but the conversation could not be saved. Please contact customer care.",503);
+  const updatedAt=new Date().toISOString();
   const {error:conversationUpdateError}=await db.from("support_conversations")
-   .update({status:"ai",updated_at:new Date().toISOString()})
+   .update(aiResult.fallback
+    ?{status:"ai",support_status:"waiting",human_requested_at:updatedAt,needs_attention:true,handled_by:null,assigned_agent_id:null,human_response_at:null,escalation_claimed_at:null,attention_notified_at:null,updated_at:updatedAt}
+    :{status:"ai",updated_at:updatedAt})
    .eq("id",conversation.id).eq("customer_id",user.id);
   if(conversationUpdateError)console.error("AI conversation reply was saved but its latest activity time was not updated",conversationUpdateError.message);
-  return json({mode:"ai",reply});
+  return json({mode:"ai",reply,fallback:aiResult.fallback,followupQueued:aiResult.fallback&&!conversationUpdateError});
  }catch(error){
   if(!(error instanceof HttpError))console.error("FemmaDexCare request failed",error.message);
   return err(error);

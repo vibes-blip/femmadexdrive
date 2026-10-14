@@ -37,7 +37,7 @@ test("the published package suggestions use supported dispatch vehicle categorie
   assert.match(packageUi, /Small & Medium Parcel/);
   assert.match(packageUi, /Large & Bulky Items/);
   assert.match(packageUi, /Fast Delivery — Within 2 Hours/);
-  assert.match(packageUi, /Standard delivery · ₦3,000 minimum/);
+  assert.match(packageUi, /Standard delivery · ₦1,500 minimum/);
   assert.match(packageUi, /suitable vehicle required/);
   assert.match(packageUi, /2× standard price · 2-hour target after rider acceptance/);
   assert.match(packageUi, /oversized or uncertain loads may need inspection/i);

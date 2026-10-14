@@ -23,12 +23,12 @@ export const body=async req=>{
  try{return await req.json()}
  catch{throw new HttpError("Request body must contain valid JSON.",400)}
 };
-export async function userFromRequest(req){
+export async function userFromRequest(req,authClient=sb()){
  const authorization=req.headers.get("authorization")||"";
  const token=authorization.match(/^Bearer\s+(\S+)$/i)?.[1];
  if(!token)throw new HttpError("Authentication required. Sign in and try again.",401);
  let result;
- try{result=await sb().auth.getUser(token)}
+ try{result=await authClient.auth.getUser(token)}
  catch{throw new HttpError("Authentication service is temporarily unavailable.",503)}
  if(result.error||!result.data.user){
   const invalidToken=result.error?.status===401||/invalid|expired|jwt|token/i.test(`${result.error?.code||""} ${result.error?.message||""}`);
@@ -36,5 +36,12 @@ export async function userFromRequest(req){
   throw new HttpError("Authentication service is temporarily unavailable.",503);
  }
  return result.data.user;
+}
+export async function userWithProfileRole(req,allowedRoles,db=sb()){
+ const user=await userFromRequest(req,db);
+ const {data:profile,error}=await db.from("profiles").select("role").eq("id",user.id).maybeSingle();
+ if(error)throw new HttpError("Could not verify your account permissions.",503);
+ if(!allowedRoles.includes(profile?.role))throw new HttpError("This account is not authorized to perform this action.",403);
+ return user;
 }
 export const err=e=>json({error:e?.message||"Server error"},Number.isInteger(e?.status)?e.status:500);

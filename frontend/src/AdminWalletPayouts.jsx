@@ -6,28 +6,47 @@ const money=value=>`₦${Number(value||0).toLocaleString("en-NG",{minimumFractio
 const date=value=>value?new Date(value).toLocaleString([],{dateStyle:"medium",timeStyle:"short"}):"—";
 const labels={pending:"Reserved",processing:"Processing",otp_required:"Needs OTP",success:"Paid",failed:"Failed",reversed:"Reversed"};
 
-async function request(action,session,payload={}){
+async function request(action,initialSession,payload={},authClient){
+ const {data,error}=await authClient.auth.getSession();
+ if(error){
+  const invalidSession=error.status===401||/invalid|expired|refresh token|jwt/i.test(error.message||"");
+  throw Object.assign(new Error(invalidSession
+   ?"Your admin session is invalid or expired. Sign in again."
+   :"Your admin session could not be verified. Try again shortly."),{status:invalidSession?401:503});
+ }
+ const currentSession=data?.session;
+ if(!currentSession||currentSession.user.id!==initialSession?.user?.id||!currentSession.access_token){
+  throw Object.assign(new Error("Your admin session is invalid or expired. Sign in again."),{status:401});
+ }
+ const session=currentSession;
  const response=await fetch(`${API_BASE}/admin-wallet`,{
   method:"POST",
   headers:{"Content-Type":"application/json",Authorization:`Bearer ${session.access_token}`},
   body:JSON.stringify({action,...payload})
  });
  const result=await response.json().catch(()=>({}));
- if(!response.ok)throw new Error(result.error||"Admin wallet request failed.");
+ if(!response.ok)throw Object.assign(new Error(result.error||"Admin wallet request failed."),{status:response.status});
  return result;
 }
 
-export default function AdminWalletPayouts({session,toast}){
+export default function AdminWalletPayouts({session,supabase,toast}){
  const [withdrawals,setWithdrawals]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState("");
  const [otpById,setOtpById]=useState({}),[busyId,setBusyId]=useState(null);
  const load=useCallback(async()=>{
   setError("");
   try{
-   const result=await request("list",session);
+   const result=await request("list",session,{},supabase);
    setWithdrawals(result.withdrawals||[]);
-  }catch(caught){setError(caught.message||"Could not load rider payouts.")}
+  }catch(caught){
+   setWithdrawals([]);
+   setError(caught.status===401
+    ?"Your admin session is invalid or expired. Sign in again to view payout records."
+    :caught.status===403
+     ?"This account is not authorized to view administrator wallet records."
+     :caught.message||"Could not load rider payouts.");
+  }
   finally{setLoading(false)}
- },[session]);
+ },[session,supabase]);
  useEffect(()=>{
   void load();
   const timer=setInterval(()=>void load(),30000);
@@ -40,7 +59,7 @@ export default function AdminWalletPayouts({session,toast}){
   if(!withdrawalId||busyId)return;
   setBusyId(withdrawalId);setError("");
   try{
-   const result=await request("finalize",session,{withdrawalId,otp:otpById[withdrawalId]||""});
+   const result=await request("finalize",session,{withdrawalId,otp:otpById[withdrawalId]||""},supabase);
    setOtpById(current=>({...current,[withdrawalId]:""}));
    toast(result.message||"Paystack authorization submitted.");
    await load();

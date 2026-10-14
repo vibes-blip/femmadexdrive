@@ -47,10 +47,22 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   const restore=()=>{
    try{
     const saved=JSON.parse(localStorage.getItem(CARE_CONVERSATION_KEY)||sessionStorage.getItem(CARE_CONVERSATION_KEY)||"null");
-    if(saved&&!localStorage.getItem(CARE_CONVERSATION_KEY))localStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify(saved));
     const isGuestSession=saved?.ownerId===null&&typeof saved.guestSessionToken==="string"&&saved.guestSessionToken;
     const belongsToCustomer=session&&saved?.ownerId===session.user.id&&typeof saved.conversationId==="string";
-    if(!isGuestSession&&!belongsToCustomer)return;
+    if(!belongsToCustomer&&!(isGuestSession&&!session)){
+     skipCareMemorySave.current=true;
+     setGuestSessionToken("");
+     setConversationId(null);
+     setConversationStatus("waiting");
+     setMessages([]);
+     setText("");
+     setNotice("");
+     setError("");
+     localStorage.removeItem(CARE_CONVERSATION_KEY);
+     sessionStorage.removeItem(CARE_CONVERSATION_KEY);
+     return;
+    }
+    if(saved&&!localStorage.getItem(CARE_CONVERSATION_KEY))localStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify(saved));
     setGuestSessionToken(isGuestSession?saved.guestSessionToken:"");
     setConversationId(isGuestSession?null:saved.conversationId);
     setConversationStatus(saved.conversationStatus||"waiting");
@@ -209,6 +221,7 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
     const userMessage={id:crypto.randomUUID(),sender_type:"customer",body,created_at:createdAt};
     const replyMessage={id:crypto.randomUUID(),sender_type:"ai",body:result.reply,created_at:createdAt};
     setMessages(current=>[...current,userMessage,replyMessage]);
+    if(result.fallback)setNotice("AI is unavailable. Your message and automatic reply are saved in this browser. Sign in to send a private request that customer care can follow up on.");
     if(!muted)void speakReply("",result.reply,replyMessage.id);
     return;
    }
@@ -222,7 +235,11 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
    if(result.mode==="human"){
     setNotice(result.reply||"Your message was sent to the assigned customer-care team.");
    }else if(result.mode==="ai"){
-    setNotice("AI assistant · not a human response");
+    setNotice(result.fallback
+     ?result.followupQueued
+      ?"AI is unavailable. Your message and automatic reply were saved, and customer care was notified to follow up here."
+      :"AI is unavailable. The reply was saved, but the care team could not be notified. Please contact support again later."
+     :"AI assistant · not a human response");
    }else throw new Error("Customer care returned an unknown response.");
    const savedMessages=await loadMessages(conversationId);
    if(result.mode==="ai"&&!muted&&result.reply){
@@ -360,7 +377,7 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   <button className="care-launcher" aria-label={open?"Close FemmaDexCare":"Open FemmaDexCare"} aria-expanded={open} title={open?"Close FemmaDexCare":"Open FemmaDexCare"} onClick={()=>open?closeCare():setOpen(true)}>
    {open?<X size={21}/>:<MessageCircle size={21}/>}
   </button>
-  {open&&<section className="care-panel" aria-label="FemmaDexCare chat" role="dialog" aria-modal="true">
+  {open&&<section className="care-panel" aria-label="FemmaDexCare chat" role="dialog" aria-modal="false">
    <div className="care-panel-head"><div><span className="eyebrow">FEMMADEXCARE</span><b>Customer support</b><small>Automated help or an available human agent</small></div><button className="care-close" onClick={closeCare} aria-label="Close chat and stop voice"><X size={18}/></button></div>
    {!conversationId&&!guestSessionToken?<div className="care-start"><p>Hi! I’m FemmaDexCare. What would you like help with today? Ask about booking, delivery categories, tracking or delivery procedures. Voice is optional; you can always type.</p>{notice&&<p className="care-notice" role="status">{notice}</p>}{error&&<p className="care-error" role="alert">{error}</p>}<button className="primary wide" onClick={start} disabled={loading}>{loading?"Connecting…":session?"Start or resume private chat":"Start private chat as a guest"} <ArrowRight size={16}/></button><small>Guest AI chat is available without an account. A customer account is required for human support, quote requests and payments.</small></div>:<>
     <div className="care-messages" aria-live="polite">
@@ -526,7 +543,11 @@ export function AdminSupportInbox({supabase,toast,session}){
   else{toast("Support request resolved.");setSelected(null);await load()}
   setLoading(false);
  };
- return <section className="panel care-applications" id="admin-support"><div className="panel-head"><div><span className="eyebrow">CUSTOMER CARE</span><h2>Customer chats</h2></div><button className="secondary" onClick={()=>void load()} disabled={loadingRequests}><RefreshCw size={16}/> Refresh chats</button></div><p>View AI conversations and human-support requests. Accept a waiting chat to reply directly as FemmaDexDrive.</p><div className="care-inbox"><div className="care-thread-list">{requests.length?requests.map(request=><button key={request.id} className={selected?.id===request.id?"care-thread selected":"care-thread"} onClick={()=>{setSelected(request);setDraft("")}}><b>{request.customer?.full_name||request.customer?.email||"Customer"}{request.needs_attention?" · Needs attention":""}</b><small>{request.human_requested_at?"Requested a human reply":request.support_status==="waiting"?"AI chat · awaiting admin":"Assigned to you"} · {new Date(request.updated_at).toLocaleString()}</small></button>):<p>{loadingRequests?"Loading customer chats…":"No open customer chats."}</p>}</div><div className="care-thread-view">{selected?<><p className="care-request-status">{loadingMessages?"Loading conversation…":`Customer: ${customer?.full_name||customer?.email||selected.customer_id}`}<br/>Status: {selected.support_status}{selected.needs_attention?" · Awaiting attention":""}</p>{selected.support_status==="waiting"&&<button className="primary" onClick={accept} disabled={loading}>Accept chat and reply</button>}{loadingMessages?<p role="status">Loading messages…</p>:<div className="care-messages">{messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}><p>{message.body}</p><small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"Customer"} · {time(message.created_at)}</small></article>)}</div>}{selected.support_status!=="waiting"&&selected.handled_by===session?.user?.id&&<><form className="care-form" onSubmit={send}><input aria-label="Reply to customer" value={draft} onChange={event=>setDraft(event.target.value)} maxLength={2000} placeholder="Type your reply to the customer"/><button className="primary" disabled={loading||!draft.trim()}><Send size={16}/> Send reply</button></form><button className="secondary" onClick={resolve} disabled={loading}>Resolve chat</button></>}</>:<p>Select a customer chat to read it and reply.</p>}</div></div></section>;
+ return <section className="panel care-applications" id="admin-support"><div className="panel-head"><div><span className="eyebrow">CUSTOMER CARE</span><h2>Customer chats</h2></div><button className="secondary" onClick={()=>void load()} disabled={loadingRequests}><RefreshCw size={16}/> Refresh chats</button></div><p>View AI conversations and human-support requests. Accept a waiting chat to reply directly as FemmaDexDrive.</p><div className="care-inbox"><div className="care-thread-list">{requests.length?requests.map(request=><button key={request.id} className={selected?.id===request.id?"care-thread selected":"care-thread"} onClick={()=>{setSelected(request);setDraft("")}}><b>{request.customer?.full_name||request.customer?.email||"Customer"}{request.needs_attention?" · Needs attention":""}</b><small>{request.human_requested_at?"Requested a human reply":request.support_status==="waiting"?"AI chat · awaiting admin":"Assigned to you"} · {new Date(request.updated_at).toLocaleString()}</small></button>):<p>{loadingRequests?"Loading customer chats…":"No open customer chats."}</p>}</div><div className="care-thread-view">{selected?<><p className="care-request-status">{loadingMessages?"Loading conversation…":`Customer: ${customer?.full_name||customer?.email||selected.customer_id}`}<br/>Status: {selected.support_status}{selected.needs_attention?" · Awaiting attention":""}</p>{selected.support_status==="waiting"&&<button className="primary" onClick={accept} disabled={loading}>Accept chat and reply</button>}{loadingMessages?<p role="status">Loading messages…</p>:<div className="care-messages">{messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}><p>{message.body}</p><small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"Customer"} · {time(message.created_at)}</small></article>)}</div>} {selected.support_status!=="waiting"&&selected.handled_by===session?.user?.id&&<><div className="care-quick-replies" aria-label="Suggested replies">{[
+  "Thanks for contacting FemmaDexDrive. I’m checking this and will update you here.",
+  "Please share your delivery tracking number so I can check the status.",
+  "Your message is saved. Customer care will follow up here as soon as possible."
+ ].map(reply=><button type="button" className="secondary" key={reply} onClick={()=>setDraft(reply)}>{reply}</button>)}</div><form className="care-form" onSubmit={send}><input aria-label="Reply to customer" value={draft} onChange={event=>setDraft(event.target.value)} maxLength={2000} placeholder="Select a suggested reply or type a custom reply"/><button className="primary" disabled={loading||!draft.trim()}><Send size={16}/> Send reply</button></form><button className="secondary" onClick={resolve} disabled={loading}>Resolve chat</button></>}</>:<p>Select a customer chat to read it and reply.</p>}</div></div></section>;
 }
 
 export function CustomerCareAdmin({supabase,toast}){

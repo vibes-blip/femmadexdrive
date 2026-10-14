@@ -4,6 +4,7 @@ import {readFileSync} from "node:fs";
 import {
   compatibleVehicle,
   fastPickupRouteStatus,
+  readAllRows,
 } from "../netlify/functions/_fast-dispatch.mjs";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -13,6 +14,22 @@ const riderUi = read("../../frontend/src/RiderDispatch.jsx");
 const adminUi = read("../../frontend/src/AdminDispatchControls.jsx");
 const server = read("../server.mjs");
 const quoteMigration = read("../supabase/migrations/011_delivery_quote_review.sql");
+const fastDispatch = read("../netlify/functions/_fast-dispatch.mjs");
+
+test("fast route screening pages through the full paid queue without a fixed 200-order cap", async () => {
+  const source = Array.from({length: 2001}, (_, id) => ({id}));
+  const requestedRanges = [];
+  const result = await readAllRows({
+    async range(start, end) {
+      requestedRanges.push([start, end]);
+      return {data: source.slice(start, end + 1), error: null};
+    },
+  });
+  assert.equal(result.data.length, 2001);
+  assert.deepEqual(requestedRanges, [[0, 999], [1000, 1999], [2000, 2999]]);
+  assert.match(fastDispatch, /readAllRows\(db\.from\("orders"\)/);
+  assert.doesNotMatch(fastDispatch, /\.limit\(200\)/);
+});
 
 test("fast route screening honors the configured pickup window and fails closed", () => {
   assert.equal(fastPickupRouteStatus(45, 120), "eligible");

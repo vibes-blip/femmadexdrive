@@ -210,7 +210,7 @@ Never prefix a secret with `VITE_`.
 
 ## Pricing
 
-The quote engine uses verified road distance at a ₦3,000 standard minimum (covering the first 5 km), then adds ₦150 for each additional kilometre. Large/bulky items cost four times the standard route price; fast delivery doubles the standard small/medium quote. At 1.2 km, the examples are ₦3,000 standard, ₦12,000 bulky and ₦6,000 fast. These are suggested prices, not confirmed charges: Operations verifies the vehicle and approves the final price before checkout.
+The quote engine uses verified road distance at a ₦1,500 standard minimum (covering the first 5 km), then adds ₦150 for each additional kilometre. Large/bulky items cost four times the standard route price; fast delivery doubles the standard small/medium quote. At 1.2 km, the examples are ₦1,500 standard, ₦6,000 bulky and ₦3,000 fast. These are suggested prices, not confirmed charges: Operations verifies the vehicle and approves the final price before checkout.
 
 ## Deployment
 

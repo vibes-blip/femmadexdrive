@@ -42,10 +42,22 @@ begin
     raise exception 'New package quotes do not preserve the existing unpaid review gate';
   end if;
 
-  if position('vehicle_reviewed_at is not null' in lower(pg_get_functiondef(
+  if position('set_order_price' in lower(pg_get_functiondef(
        'public.approve_delivery_quote(uuid,numeric,text)'::regprocedure
+     ))) = 0
+     or position('for update' in lower(pg_get_functiondef(
+       'public.set_order_price(uuid,numeric)'::regprocedure
+     ))) = 0
+     or position('approved_price = p_price' in lower(pg_get_functiondef(
+       'public.set_order_price(uuid,numeric)'::regprocedure
+     ))) = 0
+     or position('reviewed_by = auth.uid()' in lower(pg_get_functiondef(
+       'public.set_order_price(uuid,numeric)'::regprocedure
+     ))) = 0
+     or position('reviewed_at = now()' in lower(pg_get_functiondef(
+       'public.set_order_price(uuid,numeric)'::regprocedure
      ))) = 0 then
-    raise exception 'A customer price can be approved without a recorded vehicle review';
+    raise exception 'Quote approval must atomically persist price and reviewer metadata under a row lock';
   end if;
 
   if not exists (

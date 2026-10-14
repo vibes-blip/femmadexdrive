@@ -20,7 +20,7 @@ async function request(action,session,payload={}){
   body:JSON.stringify({action,...payload})
  });
  const result=await response.json().catch(()=>({}));
- if(!response.ok)throw new Error(result.error||"Rider wallet request failed.");
+ if(!response.ok)throw Object.assign(new Error(result.error||"Rider wallet request failed."),{status:response.status});
  return result;
 }
 
@@ -36,7 +36,15 @@ export default function RiderWallet({session,toast}){
    const result=await request("summary",session);
    setWallet(result.wallet||null);
    setAccount(result.account||null);
-  }catch(caught){setError(caught.message||"Could not load the rider wallet.")}
+  }catch(caught){
+   setWallet(null);
+   setAccount(null);
+   setError(caught.status===401
+    ?"Your rider session is invalid or expired. Sign in again to view your wallet."
+    :caught.status===403
+     ?"This account is not authorized to view a rider wallet."
+     :caught.message||"Could not load the rider wallet.");
+  }
   finally{setLoading(false)}
  },[session]);
  useEffect(()=>{
