@@ -34,5 +34,5 @@ test("rider deadline and ETA are presented as estimates, not guaranteed completi
   assert.match(customerAndRiderUi, /etaStatus/);
   assert.match(customerAndRiderUi, /Pickup-arrival deadline passed/);
   assert.match(riderLocationHandler, /OpenRouteService route estimate/);
-  assert.match(riderLocationHandler, /customerRequest\s*\?\s*\{ latitude: order\.dropoff_latitude[\s\S]*:\s*\{ latitude: order\.pickup_latitude/);
+  assert.match(riderLocationHandler, /const target = customerRequest\s*\?\s*interstateOrigin\s*\?\s*\{latitude:interstateOrigin\.latitude,longitude:interstateOrigin\.longitude\}\s*:\s*\{ latitude: order\.dropoff_latitude, longitude: order\.dropoff_longitude \}\s*:\s*\{ latitude: order\.pickup_latitude, longitude: order\.pickup_longitude \}/);
 });

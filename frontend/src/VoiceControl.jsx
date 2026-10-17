@@ -1,10 +1,12 @@
 import React,{useEffect,useRef,useState} from "react";
 import {Check,Mic,MicOff,Navigation,Package,Volume2,X} from "lucide-react";
 import {greetingPhrase,voiceCommand,wakeRequest} from "./voiceCommands.js";
+import {feminineVoice} from "./speech-voice.js";
 import "./voice-control.css";
 
-const feminineVoiceNames=/female|woman|zira|samantha|susan|karen|tessa|victoria|ava|salli|joanna|aria|jenny|natasha|linda|moira|fiona|serena|allison|emma|amy|olivia|google uk english female/i;
 const VOICE_GREETING_KEY="fddVoiceGreetingSeen";
+const AUTO_GREETING_KEY="fddAutoGreetingPlayed";
+const welcomeGreeting="Welcome to FemmaDexDrive. How may I help you? I can help you book or track a delivery, find rider information, or open FemmaDexCare.";
 const voiceLanguages=[
  ["en-NG","English (Nigeria)"],["en-US","English (US)"],["yo-NG","Yoruba"],["ha-NG","Hausa"],["ig-NG","Igbo"],
  ["fr-FR","French"],["es-ES","Spanish"],["ar-SA","Arabic"],["pt-PT","Portuguese"],["sw-KE","Swahili"]
@@ -18,21 +20,25 @@ function recognizeSpeech(){
 function createUtterance(text,synthesis,language){
  const utterance=new window.SpeechSynthesisUtterance(text);
  const locale=language||navigator.language||"en-US";
- const matchingLanguage=synthesis.getVoices().filter(voice=>voice.lang.toLowerCase().startsWith(locale.split("-")[0].toLowerCase()));
- utterance.voice=matchingLanguage.find(voice=>feminineVoiceNames.test(voice.name))||matchingLanguage[0]||null;
+ utterance.voice=feminineVoice(synthesis.getVoices(),locale);
+ if(!utterance.voice)return null;
  utterance.lang=locale;
- utterance.rate=0.96;
+ utterance.rate=0.93;
+ utterance.pitch=1.03;
+ utterance.volume=1;
  return utterance;
 }
 
-function speakMessage(text,language,onEnd){
+function speakMessage(text,language,onEnd,onError){
  const synthesis=window.speechSynthesis;
- if(!synthesis||!window.SpeechSynthesisUtterance){onEnd?.();return}
+ if(!synthesis||!window.SpeechSynthesisUtterance){onError?.();onEnd?.();return}
  synthesis.cancel();
  const utterance=createUtterance(text,synthesis,language);
+ if(!utterance){onError?.(new Error("A feminine voice is not installed in this browser. Gemini voice is available for signed-in FemmaDexCare replies."));onEnd?.();return}
  utterance.onend=()=>onEnd?.();
- utterance.onerror=()=>onEnd?.();
- synthesis.speak(utterance);
+ utterance.onerror=error=>{onError?.(error);onEnd?.()};
+ try{synthesis.speak(utterance)}
+ catch(error){onError?.(error);onEnd?.()}
 }
 
 function voiceErrorMessage(error){
@@ -47,15 +53,31 @@ function voiceErrorMessage(error){
 
 export default function VoiceControl(){
  const supportedLanguage=voiceLanguages.find(([code])=>code.toLowerCase()===String(navigator.language||"").toLowerCase())?.[0]||"en-NG";
- const [open,setOpen]=useState(()=>{try{return !localStorage.getItem(VOICE_GREETING_KEY)}catch{return true}}),[listening,setListening]=useState(false),[wakeEnabled,setWakeEnabled]=useState(false);
- const [message,setMessage]=useState("Hi! I’m FemmaDex. Need help? Tap Allow microphone, then say “FemmaDex, hi” and I’ll wake up. You can always type instead.");
+ const [open,setOpen]=useState(()=>{try{return !localStorage.getItem(VOICE_GREETING_KEY)}catch{return false}}),[listening,setListening]=useState(false),[wakeEnabled,setWakeEnabled]=useState(false);
+ const [message,setMessage]=useState("Welcome to FemmaDexDrive. How may I help you? Tap Play welcome if you want to hear that again.");
  const [language,setLanguage]=useState(supportedLanguage),[transcript,setTranscript]=useState("");
  const recognitionRef=useRef(null),sessionRef=useRef(0),wakeEnabledRef=useRef(false),awaitingEditRef=useRef(false),restartTimerRef=useRef(null),sleepTimerRef=useRef(null),conversationAwakeRef=useRef(false);
  const openRef=useRef(open);
  openRef.current=open;
  useEffect(()=>{
+  let active=true;
+  const timer=setTimeout(()=>{
+    try{
+     if(localStorage.getItem(AUTO_GREETING_KEY))return;
+     localStorage.setItem(AUTO_GREETING_KEY,"1");
+    }catch{
+     setMessage("Automatic welcome is off because browser storage is unavailable. Tap Play welcome any time.");
+     return;
+    }
+    speakMessage(welcomeGreeting,supportedLanguage,undefined,error=>{
+     if(active)setMessage(error?.message||"Welcome to FemmaDexDrive. If you did not hear the greeting, tap Play welcome. Microphone access is only requested if you enable voice control.");
+    });
+  },600);
+  return()=>{active=false;clearTimeout(timer)};
+ },[]);
+ useEffect(()=>{
   if(!open)return;
-  try{localStorage.setItem(VOICE_GREETING_KEY,"1")}catch{setMessage("Welcome! I’m FemmaDex. Tap Allow microphone, then say “FemmaDex, hi” if you need help. You can always type instead. This greeting may appear again if browser storage is unavailable.")}
+  try{localStorage.setItem(VOICE_GREETING_KEY,"1")}catch{setMessage("Welcome! I’m FemmaDex. Tap Allow microphone, then say “FemmaDex, hi” if you need help. You can always type instead.")}
  },[open]);
  const clearSleepTimer=()=>{clearTimeout(sleepTimerRef.current);sleepTimerRef.current=null};
  const sleepAfterSilence=(sessionId,selectedLanguage)=>{
@@ -213,7 +235,7 @@ export default function VoiceControl(){
   const request=transcript.trim();
   const command=voiceCommand(request,language);
   if(command.type==="stop"){stop();setOpen(false);return}
-  if(command.type==="unknown"){
+  if(command.type==="unknown"||command.type==="reply"){
    stop();
    setOpen(false);
    dispatchEvent(new CustomEvent("fdd-care-voice-message",{detail:{text:request}}));
@@ -259,6 +281,12 @@ export default function VoiceControl(){
   if(!wakeEnabledRef.current){setOpen(true);return}
   setOpen(value=>!value);
  };
+ const playWelcome=()=>{
+  setMessage(welcomeGreeting);
+  speakMessage(welcomeGreeting,language,undefined,error=>{
+   setMessage(error?.message||"Welcome to FemmaDexDrive. Your browser could not play the greeting. You can still use the website or try another browser.");
+  });
+ };
 
  useEffect(()=>()=>{sessionRef.current+=1;wakeEnabledRef.current=false;clearTimeout(restartTimerRef.current);clearSleepTimer();recognitionRef.current?.stop();window.speechSynthesis?.cancel()},[]);
 
@@ -271,6 +299,7 @@ export default function VoiceControl(){
    </div></div>
    {!wakeEnabled?<div className="voice-control-permission">
     <p role="status" aria-live="polite">{message} Your browser will ask permission before the microphone is used. Once enabled, listening stays active until you say “stop and close” or tap the stop button in this panel.</p>
+    <button type="button" className="voice-control-welcome" onClick={playWelcome}><Volume2 size={16}/> Play welcome</button>
     <label htmlFor="voice-language">Speech language</label>
     <select id="voice-language" value={language} onChange={changeLanguage}>{voiceLanguages.map(([code,label])=><option key={code} value={code}>{label}</option>)}</select>
     <button type="button" className="voice-control-allow" onClick={enableWakeListening}><Mic size={16}/> Allow microphone and enable wake phrase</button>

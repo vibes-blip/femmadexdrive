@@ -37,6 +37,6 @@ export default async request=>{
   if(allowed!==true)throw new HttpError("You have reached the guest support message limit. Please wait before sending more messages.",429);
   const language=typeof requestBody?.language==="string"&&languageTag.test(requestBody.language)?requestBody.language:"English";
   const aiResult=await createAiReplyResult(history,language);
-  return json({mode:"ai",reply:aiResult.reply,fallback:aiResult.fallback});
+  return json({mode:"ai",reply:aiResult.reply,fallback:aiResult.fallback,reason:aiResult.reason});
  }catch(error){if(!(error instanceof HttpError))console.error("Guest FemmaDexCare request failed",error.message);return err(error)}
 };

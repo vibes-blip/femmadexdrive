@@ -13,6 +13,8 @@
 .voice-control-permission label,.voice-control-transcript label{color:var(--muted);font-size:12px;font-weight:700}
 .voice-control-permission select,.voice-control-transcript textarea{width:100%;min-width:0;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--text);font:inherit}
 .voice-control-allow,.voice-control-transcript button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;padding:8px 12px;border:0;border-radius:10px;background:var(--royal);color:#fff;font-weight:700}
+.voice-control-welcome{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:7px 11px;border:1px solid var(--line);border-radius:10px;background:#f8f5ff;color:var(--royal);font-weight:700}
+.voice-control-welcome:hover{background:#eee8f8}
 .voice-control-transcript{display:grid;gap:8px}
 .voice-control-transcript textarea{resize:vertical;line-height:1.45}
 .voice-control-button{display:grid;place-items:center;width:48px;height:48px;min-height:48px;padding:0;border:1px solid #6240ac;border-radius:50%;background:linear-gradient(135deg,#4c1d95,#7c3aed);color:#fff;box-shadow:0 10px 28px rgba(76,29,149,.32)}

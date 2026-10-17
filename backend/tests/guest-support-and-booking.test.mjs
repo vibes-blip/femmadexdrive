@@ -55,7 +55,7 @@ test("AI service outages produce a saved fallback and trigger customer-care foll
  const result=await createAiReplyResult([{sender_type:"customer",body:"Where is my delivery?"}],"en-NG",async()=>{
   throw new HttpError("AI provider unavailable.",503);
  });
- assert.deepEqual(result,{reply:AI_UNAVAILABLE_REPLY,fallback:true});
+ assert.deepEqual(result,{reply:AI_UNAVAILABLE_REPLY,fallback:true,reason:"AI provider unavailable."});
  await assert.rejects(createAiReplyResult([],"en-NG",async()=>{throw new Error("unexpected failure")}),/unexpected failure/);
  const careHandler=read("../netlify/functions/care-chat.mjs");
  assert.match(careHandler,/support_status:"waiting",human_requested_at:updatedAt,needs_attention:true/);

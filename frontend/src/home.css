@@ -24,6 +24,19 @@
 .landing-secondary{display:flex;justify-content:flex-start;gap:24px;margin-top:22px}
 .landing-secondary a{display:inline-flex;align-items:center;gap:7px;color:#17131e;text-decoration:none;font-size:14px}
 .landing-secondary a:hover{color:var(--accent)}
+.landing-services{grid-column:1/-1;display:grid;gap:20px;margin-top:18px;padding:clamp(20px,4vw,38px);border:1px solid #e9e0fb;border-radius:24px;background:linear-gradient(145deg,#fff,#f6f1ff);color:#211634}
+.landing-services-heading{max-width:760px}
+.landing-services-heading h2{margin:8px 0;font:600 clamp(26px,4vw,38px)/1.15 'Space Grotesk';color:#211634}
+.landing-services-heading p,.landing-service-card p{margin:0;color:#655b76;font-size:14px;line-height:1.7}
+.landing-service-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.landing-service-card{overflow:hidden;border:1px solid #e9e0fb;border-radius:17px;background:#fff;box-shadow:0 8px 24px #2415370c}
+.landing-service-card img{display:block;width:100%;height:190px;object-fit:cover;background:#111d17}
+.landing-service-card>div{display:grid;gap:8px;padding:17px}
+.landing-service-card h3{margin:0;font:600 20px/1.25 'Space Grotesk';color:#211634}
+.landing-service-card .eyebrow{font-size:9px}
+.landing-service-note{display:grid;gap:5px;padding:14px 16px;border-left:3px solid #6d28d9;border-radius:8px;background:#f5f1fb;color:#655b76;font-size:13px;line-height:1.6}
+.landing-service-note strong{color:#211634}
+.landing-service-cta{justify-self:start}
 .service-guide .actions a.primary{background:#fff!important;color:#211a2b!important;border:1px solid #d8d1e2;box-shadow:0 5px 18px #24153718}
 .service-guide .actions a.primary:hover{background:#f5f2f8!important}
 .landing .info{transition:transform .2s ease,border-color .2s ease,background .2s ease}
@@ -106,6 +119,9 @@
  .landing p{font-size:16px}
  .landing-img{grid-row:2;max-height:330px;object-fit:contain}
  .landing .cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .landing-service-grid{grid-template-columns:1fr}
+ .landing-service-card{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(0,1fr)}
+ .landing-service-card img{height:100%;min-height:190px}
  .landing .info{padding:16px}
  .wallet-metrics{grid-template-columns:1fr}
  .wallet-progress,.wallet-account,.wallet-withdraw{align-items:stretch;flex-direction:column}
@@ -117,12 +133,78 @@
  .landing .actions>*{width:100%}
  .landing .cards{grid-template-columns:1fr}
  .landing-secondary{gap:16px}
+ .landing-service-card{grid-template-columns:1fr}
+ .landing-service-card img{height:180px;min-height:0}
+ .landing-service-cta{width:100%}
  .care-actions{flex-wrap:wrap}
  .care-panel{right:-2px}
 }
 @media(prefers-reduced-motion:reduce){
  .landing::before,.landing::after,.landing-img,.customer-particle-page::before,.rider-bike-particles svg,.rider-bike-particles i,.care-call-particles i{animation:none}
  .landing .info{transition:none}
+}
+
+.interstate-booking,.interstate-operations{position:relative;z-index:1}
+.interstate-booking{margin:0 0 18px}
+.interstate-booking>p,.interstate-operations>section>p{color:var(--muted);line-height:1.6}
+.interstate-package-cards{grid-template-columns:repeat(3,minmax(0,1fr))}
+.interstate-booking .package-card-copy{min-width:0}
+.interstate-station-list,.package-section{min-width:0}
+.interstate-station-list>p{color:var(--muted);font-size:13px;line-height:1.5}
+.interstate-station-option{display:flex;align-items:flex-start;gap:11px;padding:12px;margin:8px 0;border:1px solid var(--line);border-radius:12px;background:#fff}
+.interstate-station-option.selected{border-color:var(--royal);box-shadow:0 0 0 2px #6d28d922}
+.interstate-station-option input{width:auto;min-width:18px;margin-top:4px}
+.interstate-station-option>span{display:grid;gap:4px;min-width:0}
+.interstate-station-option small,.interstate-route-details span{color:var(--muted);line-height:1.45;overflow-wrap:anywhere}
+.interstate-route-details{display:grid;gap:5px}
+.interstate-route-details button{margin-top:8px}
+.interstate-collection-notice{padding:14px;border:1px solid #e8d8bc;border-radius:13px;background:#fff9ed}
+.interstate-collection-notice p{margin:6px 0 0;line-height:1.55}
+.interstate-terms{align-items:flex-start}
+.interstate-terms input{flex:0 0 auto;margin-top:4px}
+.interstate-quote-summary p{overflow-wrap:anywhere}
+.interstate-operations{width:min(1480px,100%);padding-top:20px}
+.interstate-admin-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start;margin-top:16px}
+.interstate-admin-form,.interstate-admin-list{min-width:0;padding:16px;border:1px solid var(--line);border-radius:15px;background:#ffffff08}
+.interstate-admin-form fieldset{margin:0}
+.interstate-section-title,.interstate-admin-list>h3{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.interstate-section-title h3,.interstate-admin-list>h3{margin:0}
+.interstate-checks{display:flex;flex-wrap:wrap;gap:8px 12px}
+.interstate-checks label,.interstate-admin-form .terms-consent{display:inline-flex;align-items:center;gap:7px}
+.interstate-checks input,.interstate-admin-form .terms-consent input{width:auto}
+.interstate-admin-form .two{align-items:end}
+.interstate-admin-list{display:grid;gap:10px}
+.interstate-register-item{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;min-width:0}
+.interstate-register-item>div{display:grid;gap:5px;min-width:0}
+.interstate-register-item small{color:var(--muted);line-height:1.4;overflow-wrap:anywhere}
+.interstate-register-item button{flex:none}
+.interstate-divider{height:1px;margin:24px 0;background:var(--line)}
+.interstate-admin-footnote{padding:12px;border-radius:10px;background:#ffffff08;color:var(--muted);font-size:13px;line-height:1.5}
+.interstate-order-operations .interstate-booking-admin{display:grid;gap:8px;margin-top:14px}
+.interstate-booking-admin>p{margin:0;overflow-wrap:anywhere}
+.interstate-review-form{display:grid;gap:10px;padding:12px;border:1px solid var(--line);border-radius:12px}
+.interstate-review-form .actions{flex-wrap:wrap}
+.interstate-stage-list{display:grid;gap:8px;padding-top:8px}
+.interstate-stage-event{display:flex;align-items:flex-start;gap:8px;margin:0}
+.interstate-stage-event>span{display:grid;gap:3px;min-width:0}
+.interstate-stage-event small{color:var(--muted);line-height:1.45;overflow-wrap:anywhere}
+.interstate-customer-tracking{margin:12px 0}
+.interstate-customer-tracking>p{line-height:1.5}
+.interstate-customer-events{display:grid;gap:7px;margin-top:12px}
+.interstate-customer-events>p{display:grid;gap:3px;padding-top:7px;border-top:1px solid #ffffff20}
+.interstate-customer-events small{line-height:1.45;overflow-wrap:anywhere}
+
+@media(max-width:760px){
+ .interstate-package-cards{grid-template-columns:1fr}
+ .interstate-admin-columns{grid-template-columns:1fr}
+ .interstate-admin-form,.interstate-admin-list{padding:12px}
+ .interstate-operations{padding:18px 4vw 46px}
+}
+@media(max-width:420px){
+ .interstate-admin-form .two{grid-template-columns:1fr}
+ .interstate-register-item{flex-direction:column}
+ .interstate-register-item button{width:100%}
+ .interstate-route-details button{width:100%}
 }
 
 .admin-dashboard{width:min(1480px,100%);padding-top:30px}

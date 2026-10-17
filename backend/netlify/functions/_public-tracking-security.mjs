@@ -6,7 +6,13 @@ const publicProgressStatuses = new Set([
   "accepted", "picked_up", "on_the_way", "at_door", "delivered", "completed", "cancelled",
 ]);
 
-export function publicTrackingView(order) {
+const publicInterstateEvents=new Set([
+  "pickup_rider_assigned","collected_from_sender","arrived_origin_terminal",
+  "transport_partner_received","in_transit","arrived_destination_station",
+  "ready_for_collection","recipient_collected","interstate_delivery_completed",
+]);
+
+export function publicTrackingView(order,events=[]) {
   const completedSteps = [];
   if (order.accepted_at) completedSteps.push("accepted");
   if (order.pickup_at) completedSteps.push("picked_up");
@@ -17,7 +23,7 @@ export function publicTrackingView(order) {
   if (order.delivered_at || order.completed_at) completedSteps.push("delivered");
   if (order.completed_at) completedSteps.push("completed");
 
-  return Object.fromEntries(publicTrackingFields.map((field) => [
+  const view=Object.fromEntries(publicTrackingFields.map((field) => [
     field,
     field === "completed_steps"
       ? completedSteps
@@ -25,6 +31,22 @@ export function publicTrackingView(order) {
         ? "processing"
         : order[field],
   ]));
+  if(order.journey_type==="interstate"){
+    if(order.status==="delivered")view.status="in_transit";
+    view.completed_steps=[];
+    view.journey_type="interstate";
+    view.destination_station={
+      name:order.destination_station_snapshot?.name||null,
+      city:order.destination_station_snapshot?.city||null,
+      state:order.destination_station_snapshot?.state||null,
+    };
+    view.estimated_delivery_min_days=order.estimated_delivery_min_days;
+    view.estimated_delivery_max_days=order.estimated_delivery_max_days;
+    view.milestones=(Array.isArray(events)?events:[])
+      .filter(item=>publicInterstateEvents.has(item.event))
+      .map(item=>({event:item.event,created_at:item.created_at}));
+  }
+  return view;
 }
 
 export function clientAddressFromRequest(req, { trustForwardedFor = false } = {}) {

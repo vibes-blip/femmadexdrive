@@ -30,8 +30,8 @@ test("public tracking projection allowlists only status-tracking fields", () => 
   assert.deepEqual(result.completed_steps, ["accepted", "picked_up", "on_the_way"]);
   assert.doesNotMatch(JSON.stringify(result), /private|internal-id|paid/);
   assert.equal(publicTrackingView({ tracking_number: "FDD-1234ABCD", status: "paid" }).status, "processing");
-  assert.match(trackingHandler, /\.select\("tracking_number,status,accepted_at,pickup_at,at_door_at,delivered_at,completed_at"\)/);
-  assert.match(trackingHandler, /publicTrackingView\(order\)/);
+  assert.match(trackingHandler, /\.select\("id,tracking_number,status,accepted_at,pickup_at,at_door_at,delivered_at,completed_at,journey_type,destination_station_snapshot,estimated_delivery_min_days,estimated_delivery_max_days"\)/);
+  assert.match(trackingHandler, /publicTrackingView\(order,events\)/);
   assert.doesNotMatch(trackingHandler, /pickup_address|dropoff_address|recipient_phone|latitude|payment_status/);
 });
 

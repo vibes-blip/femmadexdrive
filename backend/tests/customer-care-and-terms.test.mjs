@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {greetingPhrase,voiceCommand,wakeRequest} from "../../frontend/src/voiceCommands.js";
+import {createAiReply} from "../netlify/functions/care-chat.mjs";
 
 const read=path=>readFileSync(new URL(path,import.meta.url),"utf8");
 const careMigration=read("../supabase/migrations/020_customer_care.sql");
@@ -9,6 +10,7 @@ const escalationMigration=read("../supabase/migrations/022_support_escalation.sq
 const adminChatMigration=read("../supabase/migrations/026_admin_customer_chat_inbox.sql");
 const exceptionMigration=read("../supabase/migrations/021_dispatch_exceptions.sql");
 const termsMigration=read("../supabase/migrations/019_dispatch_terms_acceptance.sql");
+const couponMigration=read("../supabase/migrations/029_delivery_coupons.sql");
 const careHandler=read("../netlify/functions/care-chat.mjs");
 const apiServer=read("../server.mjs");
 const bookingUi=read("../../frontend/src/App.jsx");
@@ -34,6 +36,8 @@ test("customer-care accounts are approved, availability-gated and row-isolated",
 test("AI responses are server-configured, authenticated and cannot create or pay for deliveries",()=>{
  assert.match(careHandler,/CARE_AI_API_KEY/);
  assert.match(careHandler,/CARE_AI_MODEL/);
+ assert.match(careHandler,/generativelanguage\.googleapis\.com\/v1beta\/models/);
+ assert.match(careHandler,/x-goog-api-key/);
  assert.match(careHandler,/userFromRequest/);
  assert.match(careHandler,/transferConversationId/);
  assert.match(careHandler,/guestUser\.is_anonymous!==true/);
@@ -62,7 +66,8 @@ test("homepage makes booking and AI help prominent and shows the current deliver
  assert.match(apiServer,/\["care-guest-chat", \{ method: "POST"/);
  assert.match(careUi,/care-guest-session/);
  assert.match(careUi,/care-guest-chat/);
- assert.match(careUi,/AI is unavailable\. Your message and automatic reply are saved in this browser/);
+ assert.match(careUi,/result\.reason\|\|"AI is unavailable\."/);
+ assert.match(careUi,/Your message and automatic reply are saved in this browser/);
  assert.match(careUi,/customer care was notified to follow up here/);
  assert.match(careUi,/care-quick-replies/);
  assert.match(read("../../frontend/src/customer-care-chat.css"),/\.care-widget \.care-panel\{position:absolute/);
@@ -75,10 +80,16 @@ test("homepage makes booking and AI help prominent and shows the current deliver
  assert.match(bookingUi,/aria-expanded=\{menu\}/);
  assert.doesNotMatch(bookingUi,/className="logo">FD/);
  assert.doesNotMatch(bookingUi,/double[- ]tap|onDoubleClick/i);
- assert.match(bookingUi,/id:"small-medium",title:"Small & Medium Parcel",description:"Documents, phones, clothes, shoes, groceries and small packages\."/);
- assert.match(bookingUi,/id:"bulky",title:"Large & Bulky Items",description:"Furniture, appliances and large or heavy boxes\."/);
+ assert.match(bookingUi,/id:"small-medium",title:"Small & Medium Parcel",description:"Everyday items—not just documents\. Small examples: shoes, clothes, books, phones, small gifts or a securely sealed meal\/snack for immediate consumption\. Medium examples: a handbag, grocery bag, several compact items or a medium box/);
+ assert.match(bookingUi,/secure, leak-resistant packaging; special temperature-controlled handling is not promised/);
+ assert.match(bookingUi,/id:"bulky",title:"Large & Bulky Items",description:"Furniture, appliances, equipment, multiple boxes and other heavy or awkward items/);
+ assert.match(bookingUi,/What would you like to send\?/);
+ assert.match(bookingUi,/landing-service-grid/);
+ assert.match(bookingUi,/Sending to another state\?/);
  assert.match(bookingUi,/id:"fast",title:"Fast Delivery — Within 2 Hours"/);
- assert.match(bookingUi,/2-hour target after rider acceptance/);
+ assert.match(bookingUi,/2-hour target starts after a rider accepts/);
+ assert.match(read("../../frontend/src/styles.css"),/\.package-card-copy strong\{font:600 17px\/1\.3 'Space Grotesk'/);
+ assert.match(read("../../frontend/src/styles.css"),/\.package-card-copy small\{font-size:13px;line-height:1\.55;color:#c2cec8/);
  assert.match(bookingUi,/Prepare your delivery draft without signing in/);
  assert.match(bookingUi,/import VoiceControl from "\.\/VoiceControl\.jsx"/);
  assert.match(bookingUi,/<VoiceControl\/>/);
@@ -89,8 +100,9 @@ test("homepage makes booking and AI help prominent and shows the current deliver
  assert.match(voiceCommands,/\/book/);
  assert.match(voiceCommands,/\/track/);
  assert.match(voiceUi,/Choose a map suggestion to confirm its location/);
- assert.match(voiceUi,/feminineVoiceNames/);
+ assert.match(voiceUi,/feminineVoice\(synthesis\.getVoices\(\),locale\)/);
  assert.match(voiceUi,/recognition\.continuous=true/);
+ assert.match(bookingUi,/<CustomerCareChat session=\{profile\?\.role==="customer"\?session:null\}/);
  assert.match(voiceUi,/sleepAfterSilence/);
  assert.match(voiceUi,/10_000/);
  assert.match(voiceUi,/getUserMedia\(\{audio:true\}\)/);
@@ -102,10 +114,100 @@ test("homepage makes booking and AI help prominent and shows the current deliver
  assert.match(voiceUi,/recognition\.maxAlternatives=4/);
  assert.match(voiceUi,/speakMessage\(reply,selectedLanguage,resume\)/);
  assert.doesNotMatch(voiceUi,/getQuote|create-paystack-payment|\.submit\(/);
- assert.match(careUi,/Start private chat as a guest/);
+ assert.match(careUi,/care-start-options/);
  assert.match(careUi,/speakReply\(conversationId,message\.body,message\.id\)/);
  assert.match(homepageStyles,/prefers-reduced-motion:reduce/);
  assert.match(homepageStyles,/max-width:420px/);
+});
+
+test("Gemini native API powers voice answers and keeps responses FemmaDexDrive-only",async()=>{
+ const originalFetch=global.fetch;
+ const previousKey=process.env.CARE_AI_API_KEY;
+ const previousModel=process.env.CARE_AI_MODEL;
+ process.env.CARE_AI_API_KEY="test-gemini-key";
+ process.env.CARE_AI_MODEL="gemini-test-flash";
+ let requestUrl,requestHeaders,requestBody;
+ global.fetch=async(input,options)=>{
+  requestUrl=new URL(input);
+  requestHeaders=new Headers(options.headers);
+  requestBody=JSON.parse(options.body);
+  return Response.json({candidates:[{content:{parts:[{text:"You can book a parcel delivery on our booking page."}]}}]});
+ };
+ try{
+  const reply=await createAiReply([
+   {sender_type:"customer",body:"How do I book a delivery?"},
+   {sender_type:"ai",body:"I can help with FemmaDexDrive."}
+  ],"English");
+  assert.match(requestUrl.href,/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-test-flash:generateContent/);
+  assert.equal(requestHeaders.get("x-goog-api-key"),"test-gemini-key");
+  assert.equal(requestHeaders.has("authorization"),false);
+  assert.equal(requestBody.contents[0].role,"user");
+  assert.equal(requestBody.contents[1].role,"model");
+  assert.match(requestBody.systemInstruction.parts[0].text,/Only answer questions about FemmaDexDrive/);
+  assert.match(reply,/booking page/);
+ }finally{
+  global.fetch=originalFetch;
+  if(previousKey===undefined)delete process.env.CARE_AI_API_KEY;
+  else process.env.CARE_AI_API_KEY=previousKey;
+  if(previousModel===undefined)delete process.env.CARE_AI_MODEL;
+  else process.env.CARE_AI_MODEL=previousModel;
+ }
+});
+
+test("Gemini authentication and model errors explain the server setting to fix",async()=>{
+ const originalFetch=global.fetch;
+ const previousKey=process.env.CARE_AI_API_KEY;
+ process.env.CARE_AI_API_KEY="test-gemini-key";
+ global.fetch=async()=>new Response("{}",{status:403});
+ try{
+  await assert.rejects(
+   createAiReply([{sender_type:"customer",body:"How do I book?"}],"English"),
+   /Check CARE_AI_API_KEY/
+  );
+  global.fetch=async()=>new Response("{}",{status:404});
+  await assert.rejects(
+   createAiReply([{sender_type:"customer",body:"How do I book?"}],"English"),
+   /Check CARE_AI_MODEL/
+  );
+ }finally{
+  global.fetch=originalFetch;
+  if(previousKey===undefined)delete process.env.CARE_AI_API_KEY;
+  else process.env.CARE_AI_API_KEY=previousKey;
+ }
+});
+
+test("coupon discounts are reserved, approved, charged and recorded server-side",()=>{
+ const quoteHandler=read("../netlify/functions/quote.mjs");
+ const paymentHandler=read("../netlify/functions/create-paystack-payment.mjs");
+ const couponAdmin=read("../../frontend/src/CouponAdmin.jsx");
+ assert.match(couponMigration,/church_FDD','church',20/);
+ assert.match(couponMigration,/Unilag_FDD','unilag',20/);
+ assert.match(couponMigration,/1_FDD','first30',20::numeric,false,30/);
+ assert.match(couponMigration,/max_redemptions integer/);
+ assert.match(couponAdmin,/Customer of the month/i);
+ assert.match(couponMigration,/delivery_coupon_claims/);
+ assert.match(couponMigration,/discounted=greatest\(1,quote_row\.pre_discount_price-round\(quote_row\.pre_discount_price\*claim_row\.discount_percent\/100,0\)\)/);
+ assert.match(couponMigration,/set pre_discount_price=p_price,approved_price=chargeable_price/);
+ assert.match(couponMigration,/discount_amount=case when status='approved' then coupon_discount_amount else 0 end/);
+ assert.match(couponMigration,/mark_delivery_coupon_redeemed/);
+ assert.match(couponMigration,/total_spend/);
+ assert.match(quoteHandler,/reserve_delivery_coupon/);
+ assert.match(quoteHandler,/attach_delivery_coupon/);
+ assert.match(quoteHandler,/releaseCouponReservation/);
+ assert.match(paymentHandler,/prepare_approved_delivery_quote_payment/);
+ assert.match(couponAdmin,/get_delivery_coupon_award_candidates/);
+ assert.match(couponAdmin,/review_delivery_coupon_claim/);
+ assert.match(couponAdmin,/get_admin_delivery_coupon_records/);
+ assert.match(bookingUi,/Coupon code \(optional\)/);
+ assert.ok(bookingUi.indexOf('className="coupon-code-field"')<bookingUi.indexOf("Calculate delivery price"));
+ assert.doesNotMatch(bookingUi,/package-size-estimate|estimatedPackageSize/);
+ assert.match(bookingUi,/couponCode:form\.couponCode\.trim\(\)/);
+ assert.match(read("../../frontend/src/styles.css"),/\.terms-consent label span\{min-width:0;overflow-wrap:anywhere\}/);
+ assert.match(careUi,/Welcome to FemmaDexDrive!/);
+ assert.match(careUi,/Book a dispatch/);
+ assert.match(careUi,/Track an order/);
+ assert.match(careUi,/Service & company updates/);
+ assert.match(careUi,/saved\.signedInUserId===session\?\.user\?\.id/);
 });
 
 test("voice wakes on the branded greeting and returns to wake-only mode after silence",()=>{

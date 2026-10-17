@@ -12,6 +12,8 @@ const port = Number(process.env.PORT || 10000);
 const allowedOrigin = process.env.APP_ORIGIN ? new URL(process.env.APP_ORIGIN).origin : "";
 const routes = new Map([
   ["quote", { method: "POST", load: () => import("./netlify/functions/quote.mjs") }],
+  ["interstate-quote", { method: "POST", load: () => import("./netlify/functions/interstate-quote.mjs") }],
+  ["admin-pricing-preview", { method: "POST", load: () => import("./netlify/functions/admin-pricing-preview.mjs") }],
   ["create-order", { method: "POST", load: () => import("./netlify/functions/create-order.mjs") }],
   ["create-paystack-payment", { method: "POST", load: () => import("./netlify/functions/create-paystack-payment.mjs") }],
   ["notify", { method: "POST", load: () => import("./netlify/functions/notify.mjs") }],
@@ -85,6 +87,8 @@ const server = createServer(async (incoming, outgoing) => {
         "/health",
         "/api/health",
         "/api/quote",
+        "/api/interstate-quote",
+        "/api/admin-pricing-preview",
         "/api/create-order",
         "/api/create-paystack-payment",
         "/api/notify",

@@ -1,9 +1,15 @@
 import React,{useCallback,useEffect,useId,useRef,useState} from "react";
-import * as maplibregl from "maplibre-gl";
 import {Clock3,LocateFixed,MapPin,Navigation,Search,X} from "lucide-react";
 import {apiUrl} from "./api.js";
 import {houseNumberFromInput,preserveCustomerAddress} from "./address-format.js";
 
+const loadMapLibre=async()=>{
+ const [maplibregl]=await Promise.all([
+  import("maplibre-gl"),
+  import("maplibre-gl/dist/maplibre-gl.css")
+ ]);
+ return maplibregl;
+};
 const OSM_STYLE={
  version:8,
  sources:{
@@ -16,7 +22,7 @@ const OSM_STYLE={
    attribution:"© <a href='https://www.openstreetmap.org/copyright' target='_blank' rel='noopener noreferrer'>OpenStreetMap contributors</a>"
   }
  },
- layers:[{id:"openstreetmap-raster",type:"raster",source:"openstreetmap"}]
+ layers:[{id:"openstreetmap-raster",type:"raster",source:"openstreetmap",paint:{"raster-fade-duration":0}}]
 };
 const validPoint=(lat,lng)=>lat!==null&&lat!==undefined&&lat!==""&&lng!==null&&lng!==undefined&&lng!==""&&Number.isFinite(Number(lat))&&Number(lat)>=-90&&Number(lat)<=90&&Number.isFinite(Number(lng))&&Number(lng)>=-180&&Number(lng)<=180;
 export function locationUnavailableMessage(){
@@ -111,7 +117,7 @@ export function Address({label,value,onChange,onSelect,coordinates}){
    }finally{
     if(current)setSearching(false);
    }
-  },1100);
+  },300);
   return()=>{
    current=false;
    clearTimeout(timer);
@@ -208,19 +214,21 @@ export function Address({label,value,onChange,onSelect,coordinates}){
    {near&&<small className="address-hint">Showing nearby matches first{value.trim()?" for your search":""}.</small>}
    {searching&&<small className="address-hint">Searching real addresses…</small>}
    {error&&<small className="address-error" role="alert">{error}</small>}
-   {focused&&results.length>0&&<><div className="address-suggestions" role="listbox" aria-label="Matching addresses">{results.map((point,index)=><button key={`${point.lat}-${point.lng}-${index}`} type="button" role="option" disabled={selecting} onMouseDown={event=>event.preventDefault()} onClick={()=>choose(point)}><MapPin size={15}/><span><b>{point.title}</b><small>{point.details}</small></span></button>)}</div><small className="address-attribution">Address data © <a href='https://www.openstreetmap.org/copyright' target='_blank' rel='noopener noreferrer'>OpenStreetMap contributors</a></small></>}
+   {focused&&results.length>0&&<><div className="address-suggestions" role="listbox" aria-label="Matching addresses">{results.map((point,index)=><button key={`${point.lat}-${point.lng}-${index}`} type="button" role="option" disabled={selecting} onMouseDown={event=>event.preventDefault()} onClick={()=>choose(point)}><MapPin size={15}/><span><b>{point.title}</b><small>{point.details}</small></span></button>)}</div><small className="address-attribution">Address data © Geoapify, OpenStreetMap contributors</small></>}
    {focused&&!searching&&!error&&query.trim().length>=3&&results.length===0&&<small className="address-hint">No matching addresses. Try a street, landmark, nearby search, or choose on the map.</small>}
    {focused&&!query.trim()&&!near&&recent.length>0&&<div className="address-suggestions recent-locations" role="listbox" aria-label="Recent locations"><small>Recent locations</small>{recent.map((point,index)=><button key={`${point.lat}-${point.lng}-${index}`} type="button" role="option" onMouseDown={event=>event.preventDefault()} onClick={()=>choose(point)}><Clock3 size={15}/><span><b>{point.title||point.address}</b><small>{point.address}</small></span></button>)}</div>}
    {focused&&!query.trim()&&!near&&recent.length===0&&<small className="address-hint">Type to search addresses, choose a recent location, or search near you.</small>}
   </div>
-  {mapOpen&&<LocationPicker initialCoordinates={coordinates} onClose={()=>setMapOpen(false)} onSelect={choose}/>}
+  {mapOpen&&<LocationPicker initialCoordinates={coordinates} customerAddress={value} onClose={()=>setMapOpen(false)} onSelect={choose}/>}
  </>;
 }
 
-function LocationPicker({initialCoordinates,onClose,onSelect}){
+function LocationPicker({initialCoordinates,customerAddress,onClose,onSelect}){
  const container=useRef(null);
  const map=useRef(null);
  const marker=useRef(null);
+ const initialLat=initialCoordinates?.lat;
+ const initialLng=initialCoordinates?.lng;
  const [query,setQuery]=useState("");
  const [results,setResults]=useState([]);
  const [loading,setLoading]=useState(false);
@@ -247,65 +255,75 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
  useEffect(()=>{
   if(!container.current)return;
   let instance;
+  let cancelled=false;
   let initializationTimer;
-  try{
-   instance=new maplibregl.Map({
-    container:container.current,
-    style:OSM_STYLE,
-    center:initialCoordinates&&validPoint(initialCoordinates.lat,initialCoordinates.lng)?[initialCoordinates.lng,initialCoordinates.lat]:[3.3792,6.5244],
-    zoom:initialCoordinates&&validPoint(initialCoordinates.lat,initialCoordinates.lng)?15:10,
-    attributionControl:true
-   });
-   map.current=instance;
-   instance.addControl(new maplibregl.NavigationControl({showCompass:true}),"top-right");
-   initializationTimer=setTimeout(()=>{
-    if(!instance.isStyleLoaded())setMapError("The map is taking longer than expected to initialize. You can still search for a location or retry.");
-   },10000);
-   instance.on("style.load",()=>{
+  setMapError("");
+  loadMapLibre().then(maplibregl=>{
+   if(cancelled||!container.current)return;
+   try{
+    const hasInitialPoint=validPoint(initialLat,initialLng);
+    instance=new maplibregl.Map({
+     container:container.current,
+     style:OSM_STYLE,
+     center:hasInitialPoint?[Number(initialLng),Number(initialLat)]:[3.3792,6.5244],
+     zoom:hasInitialPoint?15:10,
+     attributionControl:true,
+     renderWorldCopies:false
+    });
+    map.current=instance;
+    instance.addControl(new maplibregl.NavigationControl({showCompass:true}),"top-right");
+    initializationTimer=setTimeout(()=>{
+     if(!instance.isStyleLoaded())setMapError("The map is taking longer than expected to initialize. You can still search for a location or retry.");
+    },10000);
+    instance.on("style.load",()=>{
+     clearTimeout(initializationTimer);
+     setMapError("");
+    });
+    instance.on("load",()=>{
+     clearTimeout(initializationTimer);
+     setMapError("");
+     if(hasInitialPoint){
+      marker.current=new maplibregl.Marker({color:"#6d28d9",draggable:true})
+       .setLngLat([Number(initialLng),Number(initialLat)])
+       .addTo(instance);
+      marker.current.on("dragend",handleMarkerDrag);
+     }
+    });
+    instance.on("click",event=>{
+     if(loadingRef.current)return;
+     const point={lat:event.lngLat.lat,lng:event.lngLat.lng};
+     if(marker.current)marker.current.setLngLat([point.lng,point.lat]);
+     else{
+      marker.current=new maplibregl.Marker({color:"#6d28d9",draggable:true})
+       .setLngLat([point.lng,point.lat])
+       .addTo(instance);
+      marker.current.on("dragend",handleMarkerDrag);
+     }
+     setSelectedPoint(point);
+     setSelectedAddress("");
+     setError("");
+    });
+    instance.on("error",event=>{
+     if(event.error){
+      const sourceIsTiles=event.sourceId==="openstreetmap"||event.tile||/tile\.openstreetmap\.org|tile/i.test(event.error.message||"");
+      if(sourceIsTiles)setTileWarning("Some map tiles could not be loaded. Check your connection; you can still select a location.");
+     }
+    });
+   }catch(mapError){
     clearTimeout(initializationTimer);
-    setMapError("");
-   });
-   instance.on("load",()=>{
-    clearTimeout(initializationTimer);
-    setMapError("");
-    if(initialCoordinates&&validPoint(initialCoordinates.lat,initialCoordinates.lng)){
-     marker.current=new maplibregl.Marker({color:"#6d28d9",draggable:true})
-      .setLngLat([initialCoordinates.lng,initialCoordinates.lat])
-      .addTo(instance);
-     marker.current.on("dragend",handleMarkerDrag);
-    }
-   });
-   instance.on("click",event=>{
-    if(loadingRef.current)return;
-    const point={lat:event.lngLat.lat,lng:event.lngLat.lng};
-    if(marker.current)marker.current.setLngLat([point.lng,point.lat]);
-    else{
-     marker.current=new maplibregl.Marker({color:"#6d28d9",draggable:true})
-      .setLngLat([point.lng,point.lat])
-      .addTo(instance);
-     marker.current.on("dragend",handleMarkerDrag);
-    }
-    setSelectedPoint(point);
-    setSelectedAddress("");
-    setError("");
-   });
-   instance.on("error",event=>{
-    if(event.error){
-     const sourceIsTiles=event.sourceId==="openstreetmap"||event.tile||/tile\.openstreetmap\.org|tile/i.test(event.error.message||"");
-     if(sourceIsTiles)setTileWarning("Some map tiles could not be loaded. Check your connection; you can still select a location.");
-    }
-   });
-  }catch(mapError){
-   clearTimeout(initializationTimer);
-   setMapError(mapError.message||"The map could not be opened.");
-  }
+    setMapError(mapError.message||"The map could not be opened.");
+   }
+  }).catch(mapError=>{
+   if(!cancelled)setMapError(mapError.message||"The map could not be opened.");
+  });
   return()=>{
+   cancelled=true;
    clearTimeout(initializationTimer);
    map.current=null;
    marker.current=null;
    instance?.remove();
   };
- },[initialCoordinates,handleMarkerDrag]);
+ },[initialLat,initialLng,handleMarkerDrag]);
 
  useEffect(()=>{
   const text=query.trim();
@@ -323,7 +341,7 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
    }finally{
     if(current)setSearching(false);
    }
-  },1100);
+  },300);
   return()=>{
    current=false;
    clearTimeout(timer);
@@ -366,7 +384,7 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
   setLoading(true);
   setError("");
   try{
-   const verified=await onSelect(selectedPoint,query.trim());
+   const verified=await onSelect(selectedPoint,query.trim()||String(customerAddress||"").trim());
    if(verified===false){
     setError("The selected coordinates remain on the map, but the address could not be verified. Retry address verification or move the pin.");
     return;
@@ -395,44 +413,65 @@ function LocationPicker({initialCoordinates,onClose,onSelect}){
  </div>;
 }
 
-export function DeliveryLocationMap({order,riderLocation,onClose}){
+export function DeliveryLocationMap({order,riderLocation,onClose,stationRoute=null}){
  const container=useRef(null);
  const [error,setError]=useState("");
+ const pickupLatitude=order.pickup_latitude;
+ const pickupLongitude=order.pickup_longitude;
+ const pickupAddress=order.pickup_address;
+ const dropoffLatitude=order.dropoff_latitude;
+ const dropoffLongitude=order.dropoff_longitude;
+ const dropoffAddress=order.dropoff_address;
+ const riderLatitude=riderLocation?.lat;
+ const riderLongitude=riderLocation?.lng;
  useEffect(()=>{
-  if(!validPoint(order.pickup_latitude,order.pickup_longitude)||!validPoint(order.dropoff_latitude,order.dropoff_longitude)){setError("This delivery has no verified pickup and delivery coordinates.");return}
-  const pickup={lat:Number(order.pickup_latitude),lng:Number(order.pickup_longitude)};
-  const delivery={lat:Number(order.dropoff_latitude),lng:Number(order.dropoff_longitude)};
+  if(!validPoint(pickupLatitude,pickupLongitude)||!validPoint(dropoffLatitude,dropoffLongitude)){setError("This delivery has no verified pickup and delivery coordinates.");return}
+  const pickup={lat:Number(pickupLatitude),lng:Number(pickupLongitude)};
+  const delivery={lat:Number(dropoffLatitude),lng:Number(dropoffLongitude)};
   if(!container.current)return;
   let instance;
-  try{
-   instance=new maplibregl.Map({container:container.current,style:OSM_STYLE,center:[delivery.lng,delivery.lat],zoom:12});
-   instance.addControl(new maplibregl.NavigationControl({showCompass:true}),"top-right");
-   instance.on("load",()=>{
-    const points=[
-     {point:pickup,label:`Pickup: ${order.pickup_address}`,color:"#2563eb"},
-     {point:delivery,label:`Customer delivery: ${order.dropoff_address}`,color:"#6d28d9"}
-    ];
-    if(riderLocation&&validPoint(riderLocation.lat,riderLocation.lng)){
-     points.push({point:{lat:Number(riderLocation.lat),lng:Number(riderLocation.lng)},label:"Your last shared rider location",color:"#16a34a"});
-    }
-    const bounds=new maplibregl.LngLatBounds();
-    for(const item of points){
-     const coordinates=[item.point.lng,item.point.lat];
-     bounds.extend(coordinates);
-     new maplibregl.Marker({color:item.color}).setLngLat(coordinates).setPopup(new maplibregl.Popup({offset:24}).setText(item.label)).addTo(instance);
-    }
-    instance.fitBounds(bounds,{padding:60,maxZoom:15});
-   });
-   instance.on("error",event=>{if(event.error)setError("OpenStreetMap tiles could not be loaded. Check your internet connection.")});
-  }catch(mapError){
-   setError(mapError.message||"The delivery map could not be opened.");
-  }
-  return()=>instance?.remove();
- },[order,riderLocation]);
+  let cancelled=false;
+  setError("");
+  loadMapLibre().then(maplibregl=>{
+   if(cancelled||!container.current)return;
+   try{
+    instance=new maplibregl.Map({container:container.current,style:OSM_STYLE,center:[delivery.lng,delivery.lat],zoom:12,renderWorldCopies:false});
+    instance.addControl(new maplibregl.NavigationControl({showCompass:true}),"top-right");
+    instance.on("load",()=>{
+     const points=stationRoute?[
+      {point:pickup,label:`Sender doorstep pickup: ${pickupAddress}`,color:"#2563eb"},
+      {point:{lat:Number(stationRoute.origin.latitude),lng:Number(stationRoute.origin.longitude)},
+       label:`Origin station: ${stationRoute.origin.name} · ${stationRoute.origin.address}`,color:"#ea580c"},
+      {point:{lat:Number(stationRoute.destination.latitude),lng:Number(stationRoute.destination.longitude)},
+       label:`Destination pickup station: ${stationRoute.destination.name} · ${stationRoute.destination.address}`,color:"#6d28d9"}
+     ]:[
+      {point:pickup,label:`Pickup: ${pickupAddress}`,color:"#2563eb"},
+      {point:delivery,label:`Customer delivery: ${dropoffAddress}`,color:"#6d28d9"}
+     ];
+     if(validPoint(riderLatitude,riderLongitude)){
+      points.push({point:{lat:Number(riderLatitude),lng:Number(riderLongitude)},label:"Your last shared rider location",color:"#16a34a"});
+     }
+     const bounds=new maplibregl.LngLatBounds();
+     for(const item of points){
+      const coordinates=[item.point.lng,item.point.lat];
+      bounds.extend(coordinates);
+      new maplibregl.Marker({color:item.color}).setLngLat(coordinates).setPopup(new maplibregl.Popup({offset:24}).setText(item.label)).addTo(instance);
+     }
+     instance.fitBounds(bounds,{padding:60,maxZoom:15});
+    });
+    instance.on("error",event=>{if(event.error)setError("OpenStreetMap tiles could not be loaded. Check your internet connection.")});
+   }catch(mapError){
+    setError(mapError.message||"The delivery map could not be opened.");
+   }
+  }).catch(mapError=>{
+   if(!cancelled)setError(mapError.message||"The delivery map could not be opened.");
+  });
+  return()=>{cancelled=true;instance?.remove()};
+ },[pickupLatitude,pickupLongitude,pickupAddress,dropoffLatitude,dropoffLongitude,dropoffAddress,riderLatitude,riderLongitude,stationRoute]);
 
  return <div className="modal map-modal" onClick={onClose}>
   <section className="map-card osm-map-card" onClick={event=>event.stopPropagation()}>
-   <div className="map-heading"><div><b>Delivery locations</b><small>Map uses the verified coordinates saved for this assigned delivery.</small></div><button className="close" onClick={onClose} aria-label="Close map"><X/></button></div>
+   <div className="map-heading"><div><b>{stationRoute?"Interstate station route":"Delivery locations"}</b><small>{stationRoute?"The sender pickup and admin-approved station coordinates are shown separately. The destination station is the collection point.":"Map uses the verified coordinates saved for this assigned delivery."}</small></div><button className="close" onClick={onClose} aria-label="Close map"><X/></button></div>
    {error&&<div className="address-error" role="alert">{error}</div>}
    <div className="osm-map-canvas delivery-map-canvas" ref={container} aria-label="Map showing delivery locations"/>
    <div className="notice delivery-pin-details">

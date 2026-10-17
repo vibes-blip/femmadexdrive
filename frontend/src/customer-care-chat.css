@@ -21,6 +21,8 @@
 .care-start>p{text-align:center;font-size:clamp(16px,2vw,20px)}
 .care-start>.primary{width:min(100%,360px)}
 .care-start>small{max-width:440px;text-align:center;color:var(--muted);line-height:1.5}
+.care-start-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(100%,420px)}
+.care-start-options button{min-height:44px;white-space:normal;line-height:1.35}
 .care-audio-playing{display:flex;align-items:center;gap:5px;min-height:28px;color:var(--accent)}
 .care-audio-playing>span{width:5px;height:12px;border-radius:5px;background:currentColor;animation:careWave .7s ease-in-out infinite alternate}
 .care-audio-playing>span:nth-child(2){height:21px;animation-delay:.12s}
@@ -50,6 +52,7 @@
  .care-panel-head{padding:14px 16px}
  .care-message{max-width:94%}
  .care-start{padding:22px}
+ .care-start-options{grid-template-columns:1fr}
  .customer-wallet-card{padding:14px}
 }
 @media(prefers-reduced-motion:reduce){.care-audio-playing>span{animation:none}}

@@ -47,11 +47,21 @@ export default async (req) => {
 
   try {
     const { data: order, error } = await db.from("orders")
-      .select("tracking_number,status,accepted_at,pickup_at,at_door_at,delivered_at,completed_at")
+      .select("id,tracking_number,status,accepted_at,pickup_at,at_door_at,delivered_at,completed_at,journey_type,destination_station_snapshot,estimated_delivery_min_days,estimated_delivery_max_days")
       .eq("tracking_number", tracking)
       .maybeSingle();
     if (error || !order) return genericNotFound();
-    return json({ order: publicTrackingView(order) });
+    let events=[];
+    if(order.journey_type==="interstate"){
+      const {data:eventRows,error:eventError}=await db.from("order_events")
+        .select("event,created_at").eq("order_id",order.id).order("created_at",{ascending:true});
+      if(eventError){
+        console.error("Public interstate tracking milestone lookup failed",eventError.message);
+        return unavailable();
+      }
+      events=eventRows||[];
+    }
+    return json({ order: publicTrackingView(order,events) });
   } catch (error) {
     console.error("Public tracking order lookup failed", error);
     return unavailable();

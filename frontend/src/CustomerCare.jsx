@@ -2,14 +2,13 @@ import React,{useEffect,useRef,useState} from "react";
 import {ArrowRight,Clock3,Headphones,MessageCircle,Mic,RefreshCw,Send,Volume2,VolumeX,X} from "lucide-react";
 import {API_BASE} from "./api.js";
 import {bookingDetailsFromConversation} from "./bookingAssistant.js";
+import {feminineVoice} from "./speech-voice.js";
 import "./customer-care-chat.css";
 
 const clean=value=>String(value||"").replace(/[<>]/g,"").trim();
 const time=value=>value?new Date(value).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"";
 const aiLanguage=()=>navigator.language||"en";
 const CARE_CONVERSATION_KEY="fddCareConversation";
-const feminineVoiceNames=/female|woman|zira|samantha|susan|karen|tessa|victoria|ava|salli|joanna|aria|jenny|natasha|linda|moira|fiona|serena|allison|emma|amy|olivia/i;
-
 function speechRecognition(){
  if(typeof window==="undefined")return null;
  return window.SpeechRecognition||window.webkitSpeechRecognition||null;
@@ -47,7 +46,8 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   const restore=()=>{
    try{
     const saved=JSON.parse(localStorage.getItem(CARE_CONVERSATION_KEY)||sessionStorage.getItem(CARE_CONVERSATION_KEY)||"null");
-    const isGuestSession=saved?.ownerId===null&&typeof saved.guestSessionToken==="string"&&saved.guestSessionToken;
+    const isGuestSession=saved?.ownerId===null&&typeof saved.guestSessionToken==="string"&&saved.guestSessionToken
+     &&(!saved.signedInUserId||saved.signedInUserId===session?.user?.id);
     const belongsToCustomer=session&&saved?.ownerId===session.user.id&&typeof saved.conversationId==="string";
     if(!belongsToCustomer&&!(isGuestSession&&!session)){
      skipCareMemorySave.current=true;
@@ -61,6 +61,11 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
      localStorage.removeItem(CARE_CONVERSATION_KEY);
      sessionStorage.removeItem(CARE_CONVERSATION_KEY);
      return;
+    }
+    if(isGuestSession&&session&&!saved.signedInUserId){
+     saved.signedInUserId=session.user.id;
+     localStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify(saved));
+     sessionStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify(saved));
     }
     if(saved&&!localStorage.getItem(CARE_CONVERSATION_KEY))localStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify(saved));
     setGuestSessionToken(isGuestSession?saved.guestSessionToken:"");
@@ -88,6 +93,7 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
    if(!conversationId&&!guestSessionToken){localStorage.removeItem(CARE_CONVERSATION_KEY);sessionStorage.removeItem(CARE_CONVERSATION_KEY);return}
    localStorage.setItem(CARE_CONVERSATION_KEY,JSON.stringify({
     ownerId:guestSessionToken?null:session?.user?.id||null,
+    signedInUserId:guestSessionToken?session?.user?.id||null:null,
     conversationId,
     guestSessionToken,
     conversationStatus,
@@ -174,6 +180,19 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   }
   finally{setLoading(false)}
  };
+ const beginAssistance=prompt=>{
+  setOpen(true);
+  if(conversationId||guestSessionToken){void send(prompt);return}
+  pendingVoiceMessage.current=prompt;
+  void start();
+ };
+ const openTracking=()=>{
+  stopVoice();
+  stopCurrentSpeech();
+  setOpen(false);
+  history.pushState({},"","/track");
+  dispatchEvent(new PopStateEvent("popstate"));
+ };
 
  useEffect(()=>{
   if(!open||!conversationId)return;
@@ -221,7 +240,7 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
     const userMessage={id:crypto.randomUUID(),sender_type:"customer",body,created_at:createdAt};
     const replyMessage={id:crypto.randomUUID(),sender_type:"ai",body:result.reply,created_at:createdAt};
     setMessages(current=>[...current,userMessage,replyMessage]);
-    if(result.fallback)setNotice("AI is unavailable. Your message and automatic reply are saved in this browser. Sign in to send a private request that customer care can follow up on.");
+    if(result.fallback)setNotice(`${result.reason||"AI is unavailable."} Your message and automatic reply are saved in this browser. Sign in to send a private request that customer care can follow up on.`);
     if(!muted)void speakReply("",result.reply,replyMessage.id);
     return;
    }
@@ -236,9 +255,9 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
     setNotice(result.reply||"Your message was sent to the assigned customer-care team.");
    }else if(result.mode==="ai"){
     setNotice(result.fallback
-     ?result.followupQueued
-      ?"AI is unavailable. Your message and automatic reply were saved, and customer care was notified to follow up here."
-      :"AI is unavailable. The reply was saved, but the care team could not be notified. Please contact support again later."
+     ?`${result.reason||"AI is unavailable."} ${result.followupQueued
+      ?"Your message and automatic reply were saved, and customer care was notified to follow up here."
+      :"The reply was saved, but the care team could not be notified. Please contact support again later."}`
      :"AI assistant · not a human response");
    }else throw new Error("Customer care returned an unknown response.");
    const savedMessages=await loadMessages(conversationId);
@@ -344,11 +363,15 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   window.speechSynthesis.cancel();
   const utterance=new SpeechSynthesisUtterance(message);
   utterance.lang=aiLanguage();
-  utterance.rate=0.96;
-  const language=aiLanguage().split("-")[0].toLowerCase();
-  const voices=window.speechSynthesis.getVoices();
-  const matchingVoices=voices.filter(voice=>voice.lang.toLowerCase().startsWith(language));
-  utterance.voice=matchingVoices.find(voice=>feminineVoiceNames.test(voice.name))||matchingVoices.find(voice=>/natural|neural|google/i.test(voice.name))||matchingVoices[0]||null;
+  utterance.rate=0.93;
+  utterance.pitch=1.03;
+  utterance.volume=1;
+  utterance.voice=feminineVoice(window.speechSynthesis.getVoices(),utterance.lang);
+  if(!utterance.voice){
+   setSpeaking(false);setSpeakingMessageId(null);
+   setError("No feminine browser voice is installed. Gemini voice is available for signed-in FemmaDexCare replies.");
+   return;
+  }
   utterance.onend=()=>{setSpeaking(false);setSpeakingMessageId(null)};
   utterance.onerror=()=>{setSpeaking(false);setSpeakingMessageId(null);setError("The spoken reply could not be played.")};
   setSpeaking(true);setSpeakingMessageId(messageId||null);window.speechSynthesis.speak(utterance);
@@ -379,7 +402,7 @@ export function CustomerCareChat({session,supabase,toast,open:openAuth}){
   </button>
   {open&&<section className="care-panel" aria-label="FemmaDexCare chat" role="dialog" aria-modal="false">
    <div className="care-panel-head"><div><span className="eyebrow">FEMMADEXCARE</span><b>Customer support</b><small>Automated help or an available human agent</small></div><button className="care-close" onClick={closeCare} aria-label="Close chat and stop voice"><X size={18}/></button></div>
-   {!conversationId&&!guestSessionToken?<div className="care-start"><p>Hi! I’m FemmaDexCare. What would you like help with today? Ask about booking, delivery categories, tracking or delivery procedures. Voice is optional; you can always type.</p>{notice&&<p className="care-notice" role="status">{notice}</p>}{error&&<p className="care-error" role="alert">{error}</p>}<button className="primary wide" onClick={start} disabled={loading}>{loading?"Connecting…":session?"Start or resume private chat":"Start private chat as a guest"} <ArrowRight size={16}/></button><small>Guest AI chat is available without an account. A customer account is required for human support, quote requests and payments.</small></div>:<>
+   {!conversationId&&!guestSessionToken?<div className="care-start"><p><strong>Welcome to FemmaDexDrive!</strong> I’m FemmaDexCare. How can I help you today?</p><div className="care-start-options" aria-label="FemmaDexDrive help options"><button className="secondary" onClick={()=>beginAssistance("I want to book a dispatch. Please guide me one detail at a time and help me transfer the details into the booking form.")} disabled={loading}>Book a dispatch</button><button className="secondary" onClick={openTracking}>Track an order</button><button className="secondary" onClick={()=>beginAssistance("Tell me about FemmaDexDrive service information and any published updates. Do not invent current news.")} disabled={loading}>Service & company updates</button><button className="secondary" onClick={()=>session?beginAssistance("How can I contact a human FemmaDexDrive customer-care agent?"):open("customer","login")}>Customer care</button></div>{notice&&<p className="care-notice" role="status">{notice}</p>}{error&&<p className="care-error" role="alert">{error}</p>}<button className="primary wide" onClick={()=>beginAssistance("Hello, please tell me how FemmaDexDrive can help.")} disabled={loading}>{loading?"Connecting…":"Chat with FemmaDexCare"} <ArrowRight size={16}/></button><small>Ask about dispatch booking, order tracking, service updates or customer care. You can prepare a delivery draft without signing in; an account is required to request a quote or pay.</small></div>:<>
     <div className="care-messages" aria-live="polite">
      {!messages.length&&<p className="care-welcome">Hi! I’m FemmaDexCare. I can help you get started. For a confirmed delivery, continue through the secure booking dashboard.</p>}
      {messages.map(message=><article className={`care-message ${message.sender_type}`} key={message.id}>{speakingMessageId===message.id?<div className="care-audio-playing" role="status" aria-label="FemmaDexCare is speaking"><span/><span/><span/><span/><small>FemmaDexCare is speaking</small></div>:<p>{message.body}</p>}<small>{message.sender_type==="ai"?"AI assistant":message.sender_type==="agent"?"Customer care":"You"} · {time(message.created_at)}</small>{message.sender_type==="ai"&&<button className="care-speak" onClick={()=>speakReply(conversationId,message.body,message.id)} aria-label="Speak this reply"><Volume2 size={14}/>{speakingMessageId===message.id?"Speaking":"Listen"}</button>}</article>)}

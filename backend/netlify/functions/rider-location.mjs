@@ -15,7 +15,7 @@ export default async request => {
 
     const db = sb();
     const { data: order, error: orderError } = await db.from("orders")
-      .select("customer_id,rider_id,status,pickup_latitude,pickup_longitude,dropoff_latitude,dropoff_longitude")
+      .select("customer_id,rider_id,status,journey_type,origin_station_snapshot,pickup_latitude,pickup_longitude,dropoff_latitude,dropoff_longitude")
       .eq("id", input.orderId)
       .maybeSingle();
     if (orderError) {
@@ -51,7 +51,7 @@ export default async request => {
         location: null,
         etaMinutes: null,
         etaStatus: "Rider location is not currently available.",
-        etaTarget: customerRequest ? "recipient" : "pickup",
+        etaTarget: customerRequest ? (order.journey_type==="interstate"?"origin terminal":"recipient") : "pickup",
       });
     }
 
@@ -60,9 +60,13 @@ export default async request => {
       longitude: Number(rider.lng),
       updatedAt: rider.last_seen_at,
     };
+    const interstateOrigin=order.journey_type==="interstate"?order.origin_station_snapshot:null;
     const target = customerRequest
-      ? { latitude: order.dropoff_latitude, longitude: order.dropoff_longitude }
+      ? interstateOrigin
+        ? {latitude:interstateOrigin.latitude,longitude:interstateOrigin.longitude}
+        : { latitude: order.dropoff_latitude, longitude: order.dropoff_longitude }
       : { latitude: order.pickup_latitude, longitude: order.pickup_longitude };
+    const etaTarget=customerRequest?(interstateOrigin?"origin terminal":"recipient"):"pickup";
     if (!process.env.ORS_API_KEY ||
         !Number.isFinite(Number(target.latitude)) ||
         !Number.isFinite(Number(target.longitude))) {
@@ -70,7 +74,7 @@ export default async request => {
         location,
         etaMinutes: null,
         etaStatus: "Route estimate is unavailable.",
-        etaTarget: customerRequest ? "recipient" : "pickup",
+        etaTarget,
       });
     }
 
@@ -93,7 +97,7 @@ export default async request => {
         location,
         etaMinutes: null,
         etaStatus: "Route estimate is temporarily unavailable.",
-        etaTarget: customerRequest ? "recipient" : "pickup",
+        etaTarget,
       });
     }
     if (!routeResponse.ok) {
@@ -102,7 +106,7 @@ export default async request => {
         location,
         etaMinutes: null,
         etaStatus: "Route estimate is temporarily unavailable.",
-        etaTarget: customerRequest ? "recipient" : "pickup",
+        etaTarget,
       });
     }
 
@@ -115,7 +119,7 @@ export default async request => {
         location,
         etaMinutes: null,
         etaStatus: "Route estimate is temporarily unavailable.",
-        etaTarget: customerRequest ? "recipient" : "pickup",
+        etaTarget,
       });
     }
     if (typeof durationSeconds !== "number" || !Number.isFinite(durationSeconds) || durationSeconds < 0) {
@@ -123,7 +127,7 @@ export default async request => {
         location,
         etaMinutes: null,
         etaStatus: "Route estimate is temporarily unavailable.",
-        etaTarget: customerRequest ? "recipient" : "pickup",
+        etaTarget,
       });
     }
 
@@ -131,7 +135,7 @@ export default async request => {
       location,
       etaMinutes: Math.ceil(durationSeconds / 60),
       etaStatus: "OpenRouteService route estimate; traffic conditions may differ.",
-      etaTarget: customerRequest ? "recipient" : "pickup",
+      etaTarget,
     });
   } catch (error) {
     return err(error);

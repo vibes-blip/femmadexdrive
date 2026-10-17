@@ -12,8 +12,27 @@ const coordinate=(point,key,min,max)=>{
  const number=Number(value);
  return Number.isFinite(number)&&number>=min&&number<=max?number:null;
 };
+const normalizedState=value=>{
+ const state=String(value||"").trim().toLowerCase().replace(/[().,]/g," ").replace(/\s+/g," ").replace(/\s+state$/,"");
+ return ["fct","abuja","federal capital territory"].includes(state)?"federal capital territory":state;
+};
+const isNigeria=location=>String(location?.countryCode||"").trim().toLowerCase()==="ng"||String(location?.country||"").trim().toLowerCase()==="nigeria";
+export function sameNigeriaState(pickup,dropoff){
+ const pickupState=normalizedState(pickup?.state),dropoffState=normalizedState(dropoff?.state);
+ return isNigeria(pickup)&&isNigeria(dropoff)&&Boolean(pickupState)&&pickupState===dropoffState;
+}
 
 export {calculatePriceForDeliverySpeed,calculateSuggestedPrice};
+
+async function releaseCouponReservation(db,claimId){
+ if(!claimId)return;
+ try{
+  const {error}=await db.rpc("release_delivery_coupon_reservation",{p_claim_id:claimId});
+  if(error)throw error;
+ }catch(error){
+  console.error("Could not release a coupon reservation after quote creation failed",{claimId,message:error.message});
+ }
+}
 
 export default async req=>{
  if(req.method==="OPTIONS")return new Response("",{status:204});
@@ -67,6 +86,10 @@ export default async req=>{
 
   const description=String(request.description||"").trim().slice(0,2000);
   const recipientName=String(request.recipientName||"").trim().slice(0,120);
+  const couponCode=typeof request.couponCode==="string"?request.couponCode.trim():"";
+  if(couponCode.length>48||couponCode&&!/^[a-z0-9_-]{3,48}$/i.test(couponCode)){
+   throw new HttpError("Enter a valid coupon code using letters, numbers, hyphens or underscores.",400);
+  }
   if(!description)throw new HttpError("Package description is required.",400);
   if(!recipientName)throw new HttpError("Recipient name is required.",400);
 
@@ -93,6 +116,9 @@ export default async req=>{
   }
   if(!pickup?.address?.trim()||!dropoff?.address?.trim()){
    throw new HttpError("Please verify both pickup and delivery addresses and try again.",422);
+  }
+  if(!sameNigeriaState(pickup,dropoff)){
+   throw new HttpError("This booking is for delivery within one Nigerian state. Confirm both map locations are in the same state, or choose between-states dispatch.",422);
   }
 
   if(!process.env.ORS_API_KEY){
@@ -138,6 +164,22 @@ export default async req=>{
   const standardSuggestedPrice=calculateSuggestedPrice(distanceMeters,"small");
   const categoryPrice=packageCategory==="bulky"?calculateSuggestedPrice(distanceMeters,"large"):standardSuggestedPrice;
   const suggestedPrice=calculatePriceForDeliverySpeed(categoryPrice,deliverySpeed);
+  let couponClaimId=null;
+  if(couponCode){
+   const {data:claimId,error:couponError}=await db.rpc("reserve_delivery_coupon",{
+    p_customer_id:user.id,
+    p_code:couponCode
+   });
+   if(couponError){
+    console.error("Delivery coupon could not be reserved",{code:couponError.code,message:couponError.message});
+    if(couponError.code==="PGRST202"||couponError.code==="42883"){
+     throw new HttpError("Coupon checkout is not ready. Contact FemmaDexDrive support before submitting this quote.",503);
+    }
+    throw new HttpError(couponError.message||"This coupon could not be applied.",400);
+   }
+   if(typeof claimId!=="string")throw new HttpError("The coupon was not reserved. Please try again.",503);
+   couponClaimId=claimId;
+  }
   const {data:order,error}=await db.rpc("create_delivery_quote_with_options",{
    p_customer_id:user.id,
    p_pickup_address:pickupAddress,
@@ -163,6 +205,7 @@ export default async req=>{
    p_delivery_speed:deliverySpeed
   });
   if(error){
+   await releaseCouponReservation(db,couponClaimId);
    console.error("Delivery quote persistence failed",{code:error.code,message:error.message});
    if(error.code==="PGRST202"||error.code==="42883"){
     throw new HttpError("Delivery quote service is not ready. Please contact FemmaDexDrive support before retrying.",503);
@@ -170,8 +213,23 @@ export default async req=>{
    throw new HttpError("Could not save the delivery quote. Please try again later.",500);
   }
   if(!order?.id){
+   await releaseCouponReservation(db,couponClaimId);
    console.error("Delivery quote RPC returned no persisted order ID");
    throw new HttpError("Could not confirm that the delivery quote was saved. Please contact support before retrying.",502);
+  }
+  let coupon=null;
+  if(couponClaimId){
+   const {data:claim,error:attachError}=await db.rpc("attach_delivery_coupon",{
+    p_claim_id:couponClaimId,
+    p_order_id:order.id,
+    p_customer_id:user.id
+   });
+   if(attachError||!claim){
+    await releaseCouponReservation(db,couponClaimId);
+    console.error("Quote was saved but its coupon could not be attached",{orderId:order.id,message:attachError?.message||"No coupon claim returned"});
+    throw new HttpError(`Quote ${order.tracking_number} was saved, but its coupon could not be attached. Contact FemmaDexDrive support before requesting another quote.`,503);
+   }
+   coupon={code:claim.code_snapshot,discountPercent:Number(claim.discount_percent),status:claim.status};
   }
   const {error:linkError}=await db.from("delivery_terms_acceptances")
    .update({order_id:order.id})
@@ -194,6 +252,7 @@ export default async req=>{
    suggestedPrice,
    priceMultiplier:packageCategory==="bulky"?4:deliverySpeed==="fast"?2:1,
    deliveryDeadlineHours:deliverySpeed==="fast"?2:null,
+   coupon,
    currency:"NGN"
   });
  }catch(error){

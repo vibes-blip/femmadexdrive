@@ -59,10 +59,10 @@ export default async req=>{
     headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
     signal:AbortSignal.timeout(30000),
     body:JSON.stringify({
-     contents:[{parts:[{text:message}]}],
+     contents:[{parts:[{text:`Speak only the customer-care reply below in a warm, natural feminine Nigerian English voice. Sound like a friendly, attentive human support agent, with clear pronunciation, relaxed conversational pacing, and gentle variation in pitch. Use clean close-mic speech only: no echo, reverb, music, or sound effects.\n\n${message}`}]}],
      generationConfig:{
       responseModalities:["AUDIO"],
-      speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:"Kore"}}}
+     speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:"Aoede"}}}
      }
     })
    });
