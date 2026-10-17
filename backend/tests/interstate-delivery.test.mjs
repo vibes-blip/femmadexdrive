@@ -60,8 +60,22 @@ test("station routes and interstate quotes remain isolated from verified sender 
  assert.match(interstateUi,/shoes in a box, a book, phone, small gift, clothing, groceries, or a securely sealed meal\/snack for immediate consumption/);
  assert.match(interstateUi,/A handbag, grocery bag, several small items together, or a medium carton/);
  assert.match(interstateUi,/package-medium\.svg/);
+ assert.match(interstateUi,/image:"\/images\/package-small\.jpg"/);
+ assert.match(interstateUi,/image:"\/images\/package-bulky\.jpg"/);
  assert.match(interstateUi,/Enter the sender's real doorstep address/);
  assert.match(interstateUi,/approved station and route limits/);
  assert.match(quote,/coordinates/);
  assert.match(app,/form\.pickup/);
+});
+
+test("interstate parcel cards retain their artwork and use right-side animated images",()=>{
+ const interstateUi=read("../../frontend/src/InterstateBooking.jsx");
+ const styles=read("../../frontend/src/styles.css");
+ assert.match(interstateUi,/image:"\/images\/package-small\.jpg"/);
+ assert.match(interstateUi,/image:"\/images\/package-medium\.svg"/);
+ assert.match(interstateUi,/image:"\/images\/package-bulky\.jpg"/);
+ assert.match(styles,/\.package-card-copy strong\{font:600 17px\/1\.3 'Space Grotesk';color:#d1c9de\}/);
+ assert.match(styles,/\.interstate-package-cards \.package-card img\{grid-column:2;grid-row:1/);
+ assert.match(styles,/animation:packageImageFloat 3\.2s ease-in-out infinite/);
+ assert.match(styles,/@media\(prefers-reduced-motion:reduce\)\{\.interstate-package-cards \.package-card img\{animation:none\}\}/);
 });

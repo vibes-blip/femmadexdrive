@@ -142,6 +142,12 @@ test("booking shows only the chosen dispatch form and keeps worldwide delivery u
  assert.match(bookingUi,/International \/ worldwide/);
  assert.match(bookingUi,/Cross-border dispatch is not available yet/);
  assert.match(bookingUi,/disabled aria-disabled="true"/);
+ assert.match(bookingUi,/Local%20Delivery%20Across%20the%20State\.png/);
+ assert.match(bookingUi,/Gemini_Generated_Image_9j9lss9j9lss9j9l \(1\)\.jpg/);
+ assert.match(bookingUi,/Gemini_Generated_Image_9j9lss9j9lss9j9l\.jpg/);
+ assert.match(bookingUi,/dispatch-type-action/);
+ assert.match(read("../../frontend/src/styles.css"),/\.dispatch-type-picker h2\{color:#e2e1e5/);
+ assert.match(read("../../frontend/src/styles.css"),/\.dispatch-type-card span,\.dispatch-type-card small\{color:#e2e1e5;line-height:1\.5/);
 });
 
 test("selected and edited addresses stay concise and preserve route coordinates",()=>{
