@@ -44,6 +44,23 @@
 .care-request-status{padding:8px 10px;border-radius:9px;background:#14251e;color:#c9d7d0;font-size:13px;line-height:1.5}
 .care-thread b{overflow-wrap:anywhere}
 .brand-logo{display:block;width:58px;height:58px;flex:0 0 58px;object-fit:contain;border-radius:12px;background:#fff;box-shadow:0 4px 16px rgba(76,29,149,.16)}
+.header-actions{display:flex;align-items:center;gap:10px;margin-left:auto}
+.notification-button{position:relative;display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--royal);box-shadow:0 8px 18px rgba(76,29,149,.08)}
+.notification-badge{position:absolute;top:-6px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:#c82f60;color:#fff;font-size:10px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(200,47,96,.35)}
+.notification-drawer{position:fixed;top:78px;right:20px;z-index:90;width:min(420px,calc(100vw - 28px));padding:16px;border:1px solid var(--line);border-radius:18px;background:rgba(12,16,15,.96);box-shadow:0 24px 58px rgba(6,8,10,.45);backdrop-filter:blur(12px)}
+.notification-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.notification-head h3{margin:4px 0 0}
+.notification-list{display:grid;gap:10px;max-height:380px;overflow:auto}
+.notification-item{display:grid;gap:6px;padding:12px 10px;border:1px solid var(--line);border-radius:12px;background:#121d1a}
+.notification-item strong{font-size:15px}
+.notification-item span,.notification-item small,.notification-item p{color:var(--muted);margin:0}
+.notification-item p{line-height:1.5}
+.empty-notification{margin:0;color:var(--muted);line-height:1.6}
+.customer-tracking-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:14px 0 18px}
+.customer-tracking-item{display:grid;gap:4px;align-items:start;padding:12px;border:1px solid var(--line);border-radius:12px;background:#0e1714;text-align:left;color:var(--text)}
+.customer-tracking-item.selected{border-color:var(--accent);box-shadow:inset 0 0 0 1px rgba(54,213,157,.18)}
+.customer-tracking-item span{font-weight:700}
+.customer-tracking-item small{color:var(--muted)}
 .footer-logo{display:inline-block;width:48px;height:48px;vertical-align:middle;margin-right:9px}
 .setup-logo{width:172px;height:172px;flex-basis:172px;margin:0 auto 18px}
 .customer-particle-page,.rider-hero{position:relative;isolation:isolate;overflow:hidden}
@@ -194,11 +211,28 @@
 .interstate-customer-events>p{display:grid;gap:3px;padding-top:7px;border-top:1px solid #ffffff20}
 .interstate-customer-events small{line-height:1.45;overflow-wrap:anywhere}
 
+.customer-deliveries{grid-column:1/-1}
+.customer-deliveries .order{grid-template-columns:minmax(0,1fr) auto auto;gap:16px}
+.customer-deliveries .order>div{min-width:0}
+.customer-deliveries .order>div small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.customer-deliveries .order>span{white-space:nowrap}
+.customer-deliveries .selected-detail{padding:20px;border:1px solid var(--line);border-radius:14px;background:#ffffff06}
+.admin-payment-records{margin-top:20px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#ffffff05}
+.admin-payment-records h3{margin:0 0 12px}
+.admin-payment-records>p{margin:0;color:var(--muted)}
+.admin-payment-record{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-top:1px solid var(--line)}
+.admin-payment-record>span{display:grid;gap:4px;min-width:0}
+.admin-payment-record small{color:var(--muted);overflow-wrap:anywhere}
+.admin-payment-record strong{white-space:nowrap}
+
 @media(max-width:760px){
  .interstate-package-cards{grid-template-columns:1fr}
  .interstate-admin-columns{grid-template-columns:1fr}
  .interstate-admin-form,.interstate-admin-list{padding:12px}
  .interstate-operations{padding:18px 4vw 46px}
+ .customer-deliveries .order{grid-template-columns:minmax(0,1fr) auto;gap:8px}
+ .customer-deliveries .order>span{grid-column:1/-1}
+ .admin-payment-record{align-items:flex-start;flex-direction:column}
 }
 @media(max-width:420px){
  .interstate-admin-form .two{grid-template-columns:1fr}
